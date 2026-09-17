@@ -1,0 +1,43 @@
+name: Clear Knowledge Base Data
+
+on:
+  workflow_dispatch:
+    inputs:
+      source:
+        description: 'Source name to clear (leave empty to clear ALL sources)'
+        required: false
+        default: ''
+
+jobs:
+  clear:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build TypeScript
+        run: pnpm build
+
+      - name: Run Clear
+        env:
+          TIDB_DATABASE_URL: ${{ secrets.TIDB_DATABASE_URL }}
+          TIDB_HOST: ${{ secrets.TIDB_HOST }}
+          TIDB_PORT: ${{ secrets.TIDB_PORT }}
+          TIDB_USER: ${{ secrets.TIDB_USER }}
+          TIDB_PASSWORD: ${{ secrets.TIDB_PASSWORD }}
+          TIDB_DATABASE: ${{ secrets.TIDB_DATABASE }}
+        run: node dist/clear.js ${{ inputs.source }}

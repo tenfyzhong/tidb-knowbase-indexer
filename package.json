@@ -1,0 +1,29 @@
+{
+  "name": "tidb-knowbase-indexer",
+  "version": "1.0.0",
+  "description": "Automated knowledge base indexer with vector embeddings and TiDB Cloud storage",
+  "license": "MIT",
+  "main": "dist/index.js",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "start": "node dist/index.js",
+    "clear": "node dist/clear.js"
+  },
+  "dependencies": {
+    "@actions/core": "^1.11.1",
+    "cheerio": "^1.0.0",
+    "mysql2": "^3.12.0",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.5",
+    "typescript": "^5.7.3",
+    "vitest": "^3.0.7"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
