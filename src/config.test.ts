@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
+import { resolveSslOptions } from "./db.js";
 import * as core from "@actions/core";
 import { parseConfig, parseEnv, sanitizeLogs } from "./config.js";
 
@@ -84,6 +85,37 @@ describe("config", () => {
       expect(() => parseEnv({})).toThrow("Missing database connection settings");
     });
   });
+
+    it("should configure TLS with minimum TLSv1.2 by default", () => {
+      const env = parseEnv({
+        TIDB_DATABASE_URL: "mysql://localhost/test"
+      });
+      expect(env.TIDB_SSL).toBe(true);
+      expect(env.TIDB_SSL_REJECT_UNAUTHORIZED).toBe(true);
+
+      const ssl = resolveSslOptions(env);
+      expect(ssl).toEqual({
+        minVersion: "TLSv1.2",
+        rejectUnauthorized: true
+      });
+    });
+
+    it("should support custom CA and disabling TLS if explicitly requested", () => {
+      const envWithCa = parseEnv({
+        TIDB_DATABASE_URL: "mysql://localhost/test",
+        TIDB_CA: "-----BEGIN CERTIFICATE-----\nMOCK\n-----END CERTIFICATE-----",
+        TIDB_SSL_REJECT_UNAUTHORIZED: "false"
+      });
+      const sslWithCa = resolveSslOptions(envWithCa);
+      expect(sslWithCa?.ca).toContain("BEGIN CERTIFICATE");
+      expect(sslWithCa?.rejectUnauthorized).toBe(false);
+
+      const envDisabled = parseEnv({
+        TIDB_DATABASE_URL: "mysql://localhost/test",
+        TIDB_SSL: "false"
+      });
+      expect(resolveSslOptions(envDisabled)).toBeUndefined();
+    });
 
   describe("sanitizeLogs", () => {
     it("should register secrets to core.setSecret", () => {

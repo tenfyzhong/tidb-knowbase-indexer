@@ -23,6 +23,23 @@ export interface SyncState {
   files: Record<string, SyncStateItem>;
 }
 
+export function resolveSslOptions(env: Env): mysql.SslOptions | undefined {
+  if (env.TIDB_SSL === false) {
+    return undefined;
+  }
+
+  const ssl: mysql.SslOptions = {
+    minVersion: "TLSv1.2",
+    rejectUnauthorized: env.TIDB_SSL_REJECT_UNAUTHORIZED !== false
+  };
+
+  if (env.TIDB_CA) {
+    ssl.ca = env.TIDB_CA;
+  }
+
+  return ssl;
+}
+
 export class TiDBClient {
   private pool: mysql.Pool;
   private readonly dimension: number;
@@ -30,11 +47,12 @@ export class TiDBClient {
   constructor(env: Env) {
     this.dimension = env.EMBEDDING_DIMENSION || 1024;
     const dbUrl = env.TIDB_DATABASE_URL || env.DATABASE_URL;
+    const ssl = resolveSslOptions(env);
 
     if (dbUrl) {
       this.pool = mysql.createPool({
         uri: dbUrl,
-        ssl: env.TIDB_SSL ? { minVersion: "TLSv1.2", rejectUnauthorized: true } : undefined,
+        ssl,
         waitForConnections: true,
         connectionLimit: 10,
         queueLimit: 0,
@@ -48,7 +66,7 @@ export class TiDBClient {
         user: env.TIDB_USER,
         password: env.TIDB_PASSWORD,
         database: env.TIDB_DATABASE || "test",
-        ssl: env.TIDB_SSL ? { minVersion: "TLSv1.2", rejectUnauthorized: true } : undefined,
+        ssl,
         waitForConnections: true,
         connectionLimit: 10,
         queueLimit: 0,

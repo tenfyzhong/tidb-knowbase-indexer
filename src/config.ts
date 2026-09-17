@@ -49,6 +49,11 @@ export const EnvSchema = z.object({
     if (typeof val === "string") return val.toLowerCase() !== "false";
     return val ?? true;
   }, z.boolean()).default(true),
+  TIDB_SSL_REJECT_UNAUTHORIZED: z.preprocess((val) => {
+    if (typeof val === "string") return val.toLowerCase() !== "false";
+    return val ?? true;
+  }, z.boolean()).default(true),
+  TIDB_CA: z.string().optional(),
 
   // Embedding provider configuration
   EMBEDDING_PROVIDER: z.enum(["openai", "huggingface", "gemini", "mock"]).default("openai"),
