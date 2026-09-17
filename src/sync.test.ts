@@ -99,6 +99,34 @@ describe("sync", () => {
       expect(savedState.files["guide.md"].chunkCount).toBe(1);
     });
 
+    it("should process added files with TiDB Auto Embedding when no embedder is provided", async () => {
+      mockGetSyncState.mockResolvedValue(null);
+
+      const docs = new Map<string, DocumentItem>([
+        [
+          "guide.md",
+          {
+            path: "guide.md",
+            hash: "h_guide",
+            content: "# Guide\nThis is an introduction.",
+            title: "guide"
+          }
+        ]
+      ]);
+
+      const result = await syncSource(sampleSource, docs, mockDb, null);
+
+      expect(result.addedCount).toBe(1);
+      expect(result.totalChunks).toBe(1);
+      expect(mockUpsertChunks).toHaveBeenCalledTimes(1);
+
+      const upsertedChunks = mockUpsertChunks.mock.calls[0][0] as ChunkRecord[];
+      expect(upsertedChunks).toHaveLength(1);
+      expect(upsertedChunks[0].source).toBe("test-notes");
+      expect(upsertedChunks[0].path).toBe("guide.md");
+      expect(upsertedChunks[0].embedding).toBeUndefined();
+    });
+
     it("should delete chunks for removed files", async () => {
       mockGetSyncState.mockResolvedValue({
         files: {

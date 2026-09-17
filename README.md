@@ -1,16 +1,16 @@
 # tidb-knowbase-indexer
 
-Automated incremental knowledge base indexer with vector embeddings and TiDB Cloud Starter storage.
+Automated incremental knowledge base indexer with native TiDB Cloud Auto Embedding and vector storage.
 
 ## Overview
 
 `tidb-knowbase-indexer` synchronizes documents periodically via GitHub Actions (or locally) from multiple sources directly into TiDB Cloud:
+- **TiDB Cloud Native Auto Embedding**: Leverages TiDB Cloud's native `EMBED_TEXT()` generated stored column (`tidbcloud_free/amazon/titan-embed-text-v2`). Plain text is inserted, and TiDB automatically generates and stores 1024-dimensional embeddings on the server side—**completely eliminating the need for any external embedding model API keys or local ML dependencies**.
 - **Private & Public Git Repositories**: Incremental indexing based on Git commit diffs (`git diff <lastCommit> HEAD`). Automatically supports token-based authentication for private repositories without needing SSH keys.
 - **Websites & Blogs**: Recursively crawls web pages and extracts clean content.
 - **Privacy Filter (`#confidential`)**: Automatically skips Markdown notes tagged with `#confidential` (in YAML frontmatter or inline body text), preventing sensitive notes from being indexed.
-- **Direct Vector Embedding & Storage**: Generates high-dimensional vector embeddings for each document chunk and writes vectors directly to TiDB Cloud Starter using TiDB's native `VECTOR` column and vector distance functions.
 - **Enforced TLS Security**: Enforces TLS 1.2+ with certificate validation for all connections to TiDB Cloud Serverless.
-- **Zero-Cost Architecture**: Runs on GitHub Actions free tier, uses TiDB Cloud Starter (free 5 GiB storage and 50M Request Units/month), and works with free embedding models (such as SiliconFlow free `BAAI/bge-m3`, Hugging Face free Inference API, or Google Gemini free tier).
+- **Zero-Cost Architecture**: Runs on GitHub Actions free tier, uses TiDB Cloud Starter (free 5 GiB storage and 50M Request Units/month), requiring **zero external embedding API costs**.
 - **Log Sanitization**: Uses GitHub Actions secret masking (`@actions/core.setSecret`) to prevent leakage of database credentials, private URLs, and tokens into execution logs.
 
 ## Architecture
@@ -22,14 +22,14 @@ Automated incremental knowledge base indexer with vector embeddings and TiDB Clo
  [ Chunking & Hashing ] ──(Commit Diff & #confidential filter)──┐
         │                                                        │
         ▼                                                        ▼
- [ Embedding Generation ]                              [ Calculate Diff ]
- (SiliconFlow / HF / Gemini)                                     │
+ [ Batch Text Insert ]                                 [ Calculate Diff ]
+ (Plain text chunks)                                             │
         │                                                        │
         └───────────────────────────┬────────────────────────────┘
                                     │ (TLS 1.2+ Enforced)
                                     ▼
                          [ TiDB Cloud Starter ]
-                  - chunks: VECTOR(1024) embeddings
+                  - chunks: text + EMBED_TEXT() -> VECTOR(1024)
                   - sync_state: incremental hash tracking
 ```
 
@@ -37,11 +37,10 @@ Automated incremental knowledge base indexer with vector embeddings and TiDB Clo
 
 1. **TiDB Cloud Starter (100% Free)**:
    - Sign up for [TiDB Cloud](https://tidbcloud.com/) and create a free Serverless (Starter) cluster.
-   - Obtain your connection string or credentials from the cluster overview page (`mysql://...`).
-2. **Free Embedding Provider**:
-   - **SiliconFlow**: Register at [SiliconFlow](https://siliconflow.cn/) and get a free API key. SiliconFlow provides free hosting for `BAAI/bge-m3` (1024 dimensions).
-   - **Hugging Face**: Use any free Hugging Face User Access Token with `BAAI/bge-m3`.
-   - **Google Gemini**: Obtain a free API key from Google AI Studio and use `text-embedding-004` (768 dimensions).
+   - Obtain your connection string from the cluster overview page (`mysql://...`).
+2. **Native Auto Embedding (No API Keys Needed)**:
+   - By default, uses TiDB Cloud's built-in `tidbcloud_free/amazon/titan-embed-text-v2` model.
+   - You do **not** need to register or configure any external embedding API key!
 3. **GitHub Actions**:
    - Runs automatically on the GitHub Actions free tier.
 
@@ -59,8 +58,8 @@ Configure these in the **Secrets** tab:
 |---|:---:|---|---|
 | `CONFIG_JSON` | **Yes** | JSON array configuring data sources (Git repositories or Web URLs). | `[{"name":"notes","type":"git","url":"..."}]` |
 | `TIDB_DATABASE_URL` | **Yes** | Connection string for TiDB Cloud Starter. TLS 1.2+ is enforced automatically. | `mysql://<user>:<password>@gateway.tidbcloud.com:4000/test?ssl={"minVersion":"TLSv1.2"}` |
-| `EMBEDDING_API_KEY` | **Yes** | API key for embedding generation (e.g. SiliconFlow token or OpenAI key). | `sk-...` |
 | `GH_PAT` | Optional | GitHub Personal Access Token with repository read permissions for private Git sources. | `ghp_...` |
+| `EMBEDDING_API_KEY` | Optional | Only needed if switching to custom external embedding providers (`openai`, `huggingface`, `gemini`). | `sk-...` |
 | `TIDB_HOST` | Optional | TiDB host address (alternative if `TIDB_DATABASE_URL` is omitted). | `gateway01.us-east-1.prod.aws.tidbcloud.com` |
 | `TIDB_PORT` | Optional | TiDB port (defaults to `4000`). | `4000` |
 | `TIDB_USER` | Optional | TiDB username (alternative if `TIDB_DATABASE_URL` is omitted). | `xxxxxx.root` |
@@ -73,10 +72,9 @@ Configure these in the **Variables** tab:
 
 | Variable Name | Required | Default | Allowed Values / Description |
 |---|:---:|:---:|---|
-| `EMBEDDING_PROVIDER` | No | `openai` | `openai` (SiliconFlow / OpenAI / Ollama), `huggingface`, `gemini`, `mock` |
-| `EMBEDDING_BASE_URL` | No | `https://api.siliconflow.cn/v1` | Base URL for OpenAI-compatible embedding API. |
-| `EMBEDDING_MODEL` | No | `BAAI/bge-m3` | Model identifier (e.g. `BAAI/bge-m3` or `text-embedding-004`). |
-| `EMBEDDING_DIMENSION` | No | `1024` | Vector dimension size (1024 for `bge-m3`, 768 for `text-embedding-004`). |
+| `EMBEDDING_PROVIDER` | No | `auto` | `auto` (native TiDB Cloud Auto Embedding, zero keys), `openai`, `huggingface`, `gemini`, `mock` |
+| `AUTO_EMBEDDING_MODEL` | No | `tidbcloud_free/amazon/titan-embed-text-v2` | TiDB Cloud native embedding model. |
+| `AUTO_EMBEDDING_DIMENSION` | No | `1024` | Native embedding dimension. |
 | `TIDB_SSL` | No | `true` | Enforces TLS connection to TiDB Cloud. |
 | `TIDB_SSL_REJECT_UNAUTHORIZED` | No | `true` | Validates server CA certificate against trusted root CAs. |
 
@@ -149,7 +147,6 @@ Configure these in the **Variables** tab:
 
 ```bash
 TIDB_DATABASE_URL="mysql://user:pass@gateway.tidbcloud.com:4000/test" \
-EMBEDDING_API_KEY="sk-..." \
 CONFIG_JSON='[{"name":"notes","type":"git","url":"https://github.com/user/notes.git"}]' \
 pnpm start
 ```

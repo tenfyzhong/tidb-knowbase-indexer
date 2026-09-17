@@ -73,7 +73,7 @@ export async function syncSource(
   source: Source,
   currentDocs: Map<string, DocumentItem>,
   db: TiDBClient,
-  embedder: EmbeddingProvider,
+  embedder?: EmbeddingProvider | null,
   options: SyncOptions = {}
 ): Promise<SyncResult> {
   core.info(`[${source.name}] Fetching previous sync state from TiDB...`);
@@ -149,14 +149,19 @@ export async function syncSource(
     }
 
     if (chunkTexts.length > 0) {
-      core.info(`[${source.name}] Generating embeddings for ${filePath} (${chunkTexts.length} chunks)...`);
-      const embeddings = await embedder.embed(chunkTexts);
-
-      for (let i = 0; i < pendingRecords.length; i++) {
-        newChunksToUpsert.push({
-          ...pendingRecords[i],
-          embedding: embeddings[i]
-        });
+      if (embedder) {
+        core.info(`[${source.name}] Generating embeddings for ${filePath} (${chunkTexts.length} chunks)...`);
+        const embeddings = await embedder.embed(chunkTexts);
+        for (let i = 0; i < pendingRecords.length; i++) {
+          newChunksToUpsert.push({
+            ...pendingRecords[i],
+            embedding: embeddings[i]
+          });
+        }
+      } else {
+        for (const rec of pendingRecords) {
+          newChunksToUpsert.push(rec);
+        }
       }
     }
 
@@ -198,13 +203,12 @@ export async function syncSource(
 
 export async function runSync(config: Config, env: Env): Promise<SyncResult[]> {
   const db = new TiDBClient(env);
-  const embedder = createEmbeddingProvider(env);
+  const embedder = env.EMBEDDING_PROVIDER === "auto" ? null : createEmbeddingProvider(env);
   const results: SyncResult[] = [];
 
   try {
     core.info("Initializing TiDB schema if not exists...");
-    await db.initSchema(embedder.dimension);
-
+    await db.initSchema();
     for (const source of config) {
       core.info(`=== Starting synchronization for source: ${source.name} (${source.type}) ===`);
 

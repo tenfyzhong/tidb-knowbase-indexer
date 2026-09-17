@@ -54,9 +54,12 @@ export const EnvSchema = z.object({
     return val ?? true;
   }, z.boolean()).default(true),
   TIDB_CA: z.string().optional(),
+  // TiDB Cloud native Auto Embedding configuration
+  AUTO_EMBEDDING_MODEL: z.string().default("tidbcloud_free/amazon/titan-embed-text-v2"),
+  AUTO_EMBEDDING_DIMENSION: z.coerce.number().int().default(1024),
 
-  // Embedding provider configuration
-  EMBEDDING_PROVIDER: z.enum(["openai", "huggingface", "gemini", "mock"]).default("openai"),
+  // Optional external embedding provider configuration
+  EMBEDDING_PROVIDER: z.enum(["auto", "openai", "huggingface", "gemini", "mock"]).default("auto"),
   EMBEDDING_API_KEY: z.string().optional(),
   OPENAI_API_KEY: z.string().optional(),
   HF_TOKEN: z.string().optional(),

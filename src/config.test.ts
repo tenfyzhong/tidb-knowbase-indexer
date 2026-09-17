@@ -55,7 +55,7 @@ describe("config", () => {
 
       const env = parseEnv(rawEnv);
       expect(env.TIDB_DATABASE_URL).toBe(rawEnv.TIDB_DATABASE_URL);
-      expect(env.EMBEDDING_PROVIDER).toBe("openai");
+      expect(env.EMBEDDING_PROVIDER).toBe("auto");
       expect(env.EMBEDDING_MODEL).toBe("BAAI/bge-m3");
       expect(env.EMBEDDING_DIMENSION).toBe(1024);
     });

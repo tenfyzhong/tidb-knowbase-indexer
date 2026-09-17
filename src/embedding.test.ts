@@ -45,13 +45,13 @@ describe("embedding", () => {
       expect(provider.dimension).toBe(512);
     });
 
-    it("should instantiate OpenAIEmbeddingProvider by default", () => {
+    it("should instantiate OpenAIEmbeddingProvider when provider is openai", () => {
       const env = parseEnv({
         TIDB_DATABASE_URL: "mysql://localhost/test",
+        EMBEDDING_PROVIDER: "openai",
         EMBEDDING_API_KEY: "sk-test",
         EMBEDDING_MODEL: "BAAI/bge-m3"
       });
-
       const provider = createEmbeddingProvider(env);
       expect(provider).toBeInstanceOf(OpenAIEmbeddingProvider);
       expect(provider.dimension).toBe(1024);
