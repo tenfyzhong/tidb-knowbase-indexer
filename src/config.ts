@@ -4,7 +4,7 @@ import { z } from "zod";
 export const GitSourceSchema = z.object({
   name: z.string().min(1),
   type: z.literal("git"),
-  url: z.string().url(),
+  url: z.string().min(1),
   branch: z.string().default("main"),
   include: z.array(z.string()).default(["**/*.md", "**/*.txt"]),
   exclude: z.array(z.string()).default([]),
@@ -19,7 +19,9 @@ export const WebSourceSchema = z.object({
   url: z.string().url(),
   maxDepth: z.number().int().min(1).default(2),
   urlPattern: z.string().optional(),
-  headers: z.record(z.string()).optional()
+  headers: z.record(z.string()).optional(),
+  include: z.array(z.string()).optional(),
+  exclude: z.array(z.string()).optional()
 });
 
 export type WebSource = z.infer<typeof WebSourceSchema>;
@@ -60,6 +62,7 @@ export const EnvSchema = z.object({
 
   // Git authentication
   GH_PAT: z.string().optional(),
+  GH_TOKEN: z.string().optional(),
   GITHUB_TOKEN: z.string().optional()
 });
 
@@ -106,11 +109,22 @@ export function sanitizeLogs(config: Config, env: Env): void {
   if (env.HF_TOKEN) secretsToMask.push(env.HF_TOKEN);
   if (env.GEMINI_API_KEY) secretsToMask.push(env.GEMINI_API_KEY);
   if (env.GH_PAT) secretsToMask.push(env.GH_PAT);
+  if (env.GH_TOKEN) secretsToMask.push(env.GH_TOKEN);
   if (env.GITHUB_TOKEN) secretsToMask.push(env.GITHUB_TOKEN);
 
   for (const source of config) {
     if (source.type === "git" && source.token) {
       secretsToMask.push(source.token);
+    }
+    if (source.url && source.url.length > 3) {
+      try {
+        const parsedUrl = new URL(source.url);
+        if (parsedUrl.password && parsedUrl.password.length > 3) {
+          secretsToMask.push(parsedUrl.password);
+        }
+      } catch {
+        // Not a standard HTTP URL
+      }
     }
   }
 

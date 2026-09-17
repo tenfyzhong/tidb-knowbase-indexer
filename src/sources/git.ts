@@ -12,14 +12,13 @@ const execFileAsync = promisify(execFile);
 
 function matchPattern(filePath: string, patterns: string[]): boolean {
   return patterns.some((pattern) => {
-    // Convert glob pattern to regular expression
-    const regexPattern = pattern
-      .replace(/[.+^${}()|[\]\\]/g, "\\$&")
-      .replace(/\*\*/g, ".*")
-      .replace(/\*(?!\*)/g, "[^/]*")
-      .replace(/\?/g, ".");
-    const regex = new RegExp(`^${regexPattern}$`);
-    return regex.test(filePath);
+    if (pattern.startsWith("**/")) {
+      const ext = pattern.slice(3);
+      if (ext.startsWith("*.")) {
+        return filePath.endsWith(ext.slice(1));
+      }
+    }
+    return filePath.includes(pattern.replace(/\*/g, ""));
   });
 }
 
@@ -38,34 +37,50 @@ export function parseGitDiffOutput(
     const parts = line.split(/\t+/);
     if (parts.length < 2) continue;
 
-    const statusCode = parts[0];
-    const status = statusCode[0];
+    const status = parts[0];
+    const statusCode = status[0].toUpperCase();
 
-    if (status === "R" || status === "C") {
+    if (statusCode === "R") {
       const oldPath = parts[1];
       const newPath = parts[2] || parts[1];
 
-      if (matchPattern(oldPath, includePatterns) && !matchPattern(oldPath, excludePatterns)) {
+      if (
+        matchPattern(oldPath, includePatterns) &&
+        !excludePatterns.some((ex) => oldPath.includes(ex))
+      ) {
         deleted.add(oldPath);
       }
-      if (matchPattern(newPath, includePatterns) && !matchPattern(newPath, excludePatterns)) {
+
+      if (
+        matchPattern(newPath, includePatterns) &&
+        !excludePatterns.some((ex) => newPath.includes(ex))
+      ) {
         added.add(newPath);
       }
-      continue;
-    }
-
-    const filePath = parts[1];
-    const isIncluded = matchPattern(filePath, includePatterns);
-    const isExcluded = matchPattern(filePath, excludePatterns);
-
-    if (!isIncluded || isExcluded) continue;
-
-    if (status === "A") {
-      added.add(filePath);
-    } else if (status === "M") {
-      modified.add(filePath);
-    } else if (status === "D") {
-      deleted.add(filePath);
+    } else if (statusCode === "D") {
+      const filePath = parts[1];
+      if (
+        matchPattern(filePath, includePatterns) &&
+        !excludePatterns.some((ex) => filePath.includes(ex))
+      ) {
+        deleted.add(filePath);
+      }
+    } else if (statusCode === "A" || statusCode === "C") {
+      const filePath = parts[1];
+      if (
+        matchPattern(filePath, includePatterns) &&
+        !excludePatterns.some((ex) => filePath.includes(ex))
+      ) {
+        added.add(filePath);
+      }
+    } else if (statusCode === "M") {
+      const filePath = parts[1];
+      if (
+        matchPattern(filePath, includePatterns) &&
+        !excludePatterns.some((ex) => filePath.includes(ex))
+      ) {
+        modified.add(filePath);
+      }
     }
   }
 
@@ -90,110 +105,151 @@ export async function loadGitDocuments(
   const docs = new Map<string, DocumentItem>();
 
   try {
-    let authUrl = source.url;
-    if (source.token) {
-      const urlObj = new URL(source.url);
-      urlObj.username = "x-access-token";
-      urlObj.password = source.token;
-      authUrl = urlObj.toString();
+    const cloneArgs = ["clone"];
+    if (source.branch) {
+      cloneArgs.push("-b", source.branch);
     }
 
-    await fs.mkdir(tempDir, { recursive: true });
+    let cloneUrl = source.url;
+    const token =
+      source.token ||
+      process.env.GH_PAT ||
+      process.env.GH_TOKEN ||
+      process.env.GITHUB_TOKEN;
 
-    let isIncremental = false;
-    let diffResult: DiffResult | undefined;
-
-    if (lastCommit) {
-      try {
-        await execFileAsync("git", ["init"], { cwd: tempDir });
-        await execFileAsync("git", ["remote", "add", "origin", authUrl], { cwd: tempDir });
-        await execFileAsync("git", ["fetch", "--depth=50", "origin", source.branch], { cwd: tempDir });
-        await execFileAsync("git", ["checkout", source.branch], { cwd: tempDir });
-
-        const { stdout: headStdout } = await execFileAsync("git", ["rev-parse", "HEAD"], { cwd: tempDir });
-        const currentCommit = headStdout.trim();
-
-        if (currentCommit === lastCommit) {
-          return { currentCommit, docs };
+    if (token) {
+      if (cloneUrl.startsWith("git@github.com:")) {
+        const repoPath = cloneUrl.slice("git@github.com:".length);
+        cloneUrl = `https://x-access-token:${token}@github.com/${repoPath}`;
+      } else if (cloneUrl.startsWith("https://github.com/")) {
+        const repoPath = cloneUrl.slice("https://github.com/".length);
+        cloneUrl = `https://x-access-token:${token}@github.com/${repoPath}`;
+      } else if (cloneUrl.startsWith("https://")) {
+        try {
+          const urlObj = new URL(cloneUrl);
+          urlObj.username = "x-access-token";
+          urlObj.password = token;
+          cloneUrl = urlObj.toString();
+        } catch {
+          // ignore
         }
+      }
+    }
 
-        // Check if lastCommit is present in fetched history
-        await execFileAsync("git", ["cat-file", "-e", `${lastCommit}^{commit}`], { cwd: tempDir });
+    cloneArgs.push(cloneUrl, tempDir);
 
-        const { stdout: diffStdout } = await execFileAsync(
+    try {
+      await execFileAsync("git", cloneArgs, { timeout: 120000 });
+    } catch (err) {
+      if (source.branch) {
+        const fallbackArgs = ["clone", cloneUrl, tempDir];
+        await execFileAsync("git", fallbackArgs, { timeout: 120000 });
+      } else {
+        throw err;
+      }
+    }
+
+    const { stdout: headShaOut } = await execFileAsync("git", ["rev-parse", "HEAD"], {
+      cwd: tempDir
+    });
+    const currentCommit = headShaOut.trim();
+
+    const includePatterns =
+      source.include && source.include.length > 0
+        ? source.include
+        : ["**/*.md", "**/*.txt", "**/*.markdown"];
+    const excludePatterns =
+      source.exclude && source.exclude.length > 0
+        ? source.exclude
+        : [".git", "node_modules", ".DS_Store"];
+
+    // Try git diff if lastCommit is provided and valid
+    if (lastCommit && lastCommit.trim().length > 0) {
+      try {
+        const { stdout: commitCheck } = await execFileAsync(
           "git",
-          ["diff", "--name-status", lastCommit, "HEAD"],
+          ["cat-file", "-t", lastCommit],
           { cwd: tempDir }
         );
 
-        const parsed = parseGitDiffOutput(diffStdout, source.include, source.exclude);
-        isIncremental = true;
-        diffResult = {
-          added: parsed.added,
-          modified: parsed.modified,
-          deleted: parsed.deleted,
-          unchanged: []
-        };
+        if (commitCheck.trim() === "commit") {
+          const { stdout: diffOutput } = await execFileAsync(
+            "git",
+            ["diff", "--name-status", lastCommit, "HEAD"],
+            { cwd: tempDir }
+          );
 
-        // Read content for added and modified files
-        const filesToRead = [...parsed.added, ...parsed.modified];
-        for (const relPath of filesToRead) {
-          const fullPath = path.join(tempDir, relPath);
-          try {
-            const content = await fs.readFile(fullPath, "utf-8");
-            const hash = computeHash(content);
-            const title = path.basename(relPath, path.extname(relPath));
-            docs.set(relPath, { path: relPath, hash, content, title });
-          } catch {
-            // File might have been deleted in working tree
-          }
-        }
+          const parsed = parseGitDiffOutput(diffOutput, includePatterns, excludePatterns);
 
-        return { currentCommit, diff: diffResult, docs };
-      } catch {
-        // Fallback to full clone
-        await fs.rm(tempDir, { recursive: true, force: true }).catch(() => {});
-        await fs.mkdir(tempDir, { recursive: true });
-      }
-    }
-
-    // Full clone
-    await execFileAsync("git", ["clone", "--depth=1", "--branch", source.branch, authUrl, tempDir]);
-
-    const { stdout: headStdout } = await execFileAsync("git", ["rev-parse", "HEAD"], { cwd: tempDir });
-    const currentCommit = headStdout.trim();
-
-    async function walk(dir: string, baseDir: string): Promise<void> {
-      const entries = await fs.readdir(dir, { withFileTypes: true });
-      for (const entry of entries) {
-        if (entry.name === ".git") continue;
-        const fullPath = path.join(dir, entry.name);
-        const relPath = path.relative(baseDir, fullPath).replace(/\\/g, "/");
-
-        if (entry.isDirectory()) {
-          if (!matchPattern(`${relPath}/`, source.exclude)) {
-            await walk(fullPath, baseDir);
-          }
-        } else if (entry.isFile()) {
-          const isIncluded = matchPattern(relPath, source.include);
-          const isExcluded = matchPattern(relPath, source.exclude);
-
-          if (isIncluded && !isExcluded) {
+          const filesToRead = [...parsed.added, ...parsed.modified];
+          for (const relPath of filesToRead) {
+            const fullPath = path.join(tempDir, relPath);
             try {
               const content = await fs.readFile(fullPath, "utf-8");
               const hash = computeHash(content);
-              const title = path.basename(relPath, path.extname(relPath));
-              docs.set(relPath, { path: relPath, hash, content, title });
+              docs.set(relPath, {
+                path: relPath,
+                hash,
+                content,
+                title: path.basename(relPath).replace(/\.[^/.]+$/, "")
+              });
             } catch {
-              // Ignore unreadable binary or missing files
+              // File might have been removed
             }
+          }
+
+          return {
+            currentCommit,
+            diff: {
+              added: parsed.added,
+              modified: parsed.modified,
+              deleted: parsed.deleted,
+              unchanged: []
+            },
+            docs
+          };
+        }
+      } catch {
+        // Fall back to full scan
+      }
+    }
+
+    // Full repository scan fallback
+    async function walk(dir: string, relDir: string = ""): Promise<void> {
+      const entries = await fs.readdir(dir, { withFileTypes: true });
+
+      for (const entry of entries) {
+        const relPath = relDir ? `${relDir}/${entry.name}` : entry.name;
+
+        if (excludePatterns.some((ex) => relPath.includes(ex))) {
+          continue;
+        }
+
+        const fullPath = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          await walk(fullPath, relPath);
+        } else if (entry.isFile()) {
+          const isIncluded = matchPattern(relPath, includePatterns);
+          if (isIncluded) {
+            const content = await fs.readFile(fullPath, "utf-8");
+            const hash = computeHash(content);
+            docs.set(relPath, {
+              path: relPath,
+              hash,
+              content,
+              title: entry.name.replace(/\.[^/.]+$/, "")
+            });
           }
         }
       }
     }
 
-    await walk(tempDir, tempDir);
-    return { currentCommit, docs };
+    await walk(tempDir);
+
+    return {
+      currentCommit,
+      docs
+    };
   } finally {
     await fs.rm(tempDir, { recursive: true, force: true }).catch(() => {});
   }

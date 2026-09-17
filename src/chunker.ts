@@ -26,19 +26,40 @@ export function generateVectorId(sourceName: string, filePath: string, chunkInde
 export function hasConfidentialTag(content: string): boolean {
   if (!content) return false;
 
-  // 1. Check YAML frontmatter for confidential tags
+  // 1. Check YAML frontmatter
   const frontmatterMatch = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
   if (frontmatterMatch) {
     const frontmatter = frontmatterMatch[1];
-    const tagsMatch = frontmatter.match(/(?:tags|tag|labels):\s*([\s\S]*?)(?=\n[a-zA-Z0-9_-]+:|$)/i);
-    if (tagsMatch) {
-      const tagContent = tagsMatch[1].toLowerCase();
+
+    // Check tags: [..., confidential, ...] or tag: [..., confidential, ...]
+    const arrayMatch = frontmatter.match(/tags?\s*:\s*\[([\s\S]*?)\]/i);
+    if (arrayMatch) {
+      const items = arrayMatch[1].split(",").map((s) => s.trim().replace(/^['"#]+|['"]+$/g, ""));
       if (
-        tagContent.includes("confidential") ||
-        tagContent.includes("#confidential") ||
-        tagContent.includes('"confidential"') ||
-        tagContent.includes("'confidential'")
+        items.some(
+          (item) =>
+            item.toLowerCase() === "confidential" ||
+            item.toLowerCase().startsWith("confidential/")
+        )
       ) {
+        return true;
+      }
+    }
+
+    // Check list format: tags:\n  - confidential
+    const listMatches = frontmatter.matchAll(/^\s*-\s*['"#]?([a-zA-Z0-9_\-/]+)['"]?/gim);
+    for (const match of listMatches) {
+      const tag = match[1].toLowerCase();
+      if (tag === "confidential" || tag.startsWith("confidential/")) {
+        return true;
+      }
+    }
+
+    // Check single line: tags: confidential or tag: confidential
+    const singleMatch = frontmatter.match(/^tags?\s*:\s*['"#]?([a-zA-Z0-9_\-/]+)['"]?\s*$/im);
+    if (singleMatch) {
+      const tag = singleMatch[1].toLowerCase();
+      if (tag === "confidential" || tag.startsWith("confidential/")) {
         return true;
       }
     }
@@ -57,126 +78,142 @@ export function hasConfidentialTag(content: string): boolean {
 export function extractHtmlText(html: string): { title: string; text: string } {
   const $ = cheerio.load(html);
 
-  $("script, style, nav, footer, header, noscript, svg, iframe").remove();
+  // Remove elements that do not contain core article content
+  $("script, style, noscript, nav, footer, header, svg, iframe, form").remove();
 
-  const title = $("title").first().text().trim() ||
-    $("h1").first().text().trim() ||
-    "";
+  const title = $("title").text().trim() || $("h1").first().text().trim() || "";
 
-  // Replace block elements with newlines to preserve spacing
-  $("p, div, h1, h2, h3, h4, h5, h6, li, tr, blockquote, pre, section, article").each((_, el) => {
-    $(el).append("\n");
+  // Target main content container if available, otherwise body
+  const root = $("article, main, .content, .post, #content").first();
+  const target = root.length > 0 ? root : $("body");
+
+  // Collect text paragraphs
+  const lines: string[] = [];
+  target.find("h1, h2, h3, h4, h5, h6, p, li, blockquote, pre, code").each((_, el) => {
+    const text = $(el).text().trim();
+    if (text.length > 0) {
+      lines.push(text);
+    }
   });
 
-  const rawText = $("body").length ? $("body").text() : $.text();
-  const cleanText = rawText
-    .replace(/\r\n/g, "\n")
-    .replace(/\t/g, " ")
-    .replace(/[ \u00A0]+/g, " ")
-    .replace(/\n\s*\n\s*\n+/g, "\n\n")
-    .trim();
+  const fullText = lines.length > 0 ? lines.join("\n\n") : target.text().replace(/\s+/g, " ").trim();
 
-  return { title, text: cleanText };
+  return {
+    title,
+    text: fullText
+  };
 }
 
-export function chunkText(content: string, options: ChunkOptions = {}): TextChunk[] {
-  const maxChunkSize = options.maxChunkSize || 1000;
-  const overlap = options.overlap !== undefined ? options.overlap : 150;
+export function chunkText(
+  content: string,
+  options: ChunkOptions = {}
+): TextChunk[] {
+  const maxChunkSize = options.maxChunkSize ?? 1000;
+  const overlap = options.overlap ?? 150;
 
-  if (!content || content.trim().length === 0) {
+  const normalized = content.replace(/\r\n/g, "\n").trim();
+  if (normalized.length === 0) {
     return [];
   }
 
-  // If text is short enough, return as single chunk
-  if (content.length <= maxChunkSize) {
+  if (normalized.length <= maxChunkSize) {
     return [
       {
         chunkIndex: 0,
-        text: content.trim(),
+        text: normalized,
         charStart: 0,
-        charEnd: content.length
+        charEnd: normalized.length
       }
     ];
   }
 
-  // Split content by Markdown headers or section dividers
-  const sectionSplitter = /(?=(?:\r?\n|^)#{1,4}\s+)/g;
-  const rawSections = content.split(sectionSplitter).filter((s) => s.trim().length > 0);
+  // Split into structural segments (paragraphs and headings)
+  const rawSegments = normalized.split(/\n\s*\n/);
+  const segments: string[] = [];
 
-  const sections: string[] = [];
-  for (const sec of rawSections) {
-    if (sec.length > maxChunkSize) {
-      // Split large section by paragraph boundaries
-      const paragraphs = sec.split(/\n\s*\n/).filter((p) => p.trim().length > 0);
-      let currentParaGroup = "";
-
-      for (const p of paragraphs) {
-        if (p.length > maxChunkSize) {
-          // Hard split very long single paragraphs (e.g. log output)
-          if (currentParaGroup) {
-            sections.push(currentParaGroup);
-            currentParaGroup = "";
+  for (const seg of rawSegments) {
+    const trimmed = seg.trim();
+    if (!trimmed) continue;
+    if (trimmed.length > maxChunkSize) {
+      const sentenceRegex = /[^.!?\n]+[.!?\n]+|[^.!?\n]+$/g;
+      const sentences = trimmed.match(sentenceRegex) || [trimmed];
+      for (const s of sentences) {
+        const sTrim = s.trim();
+        if (!sTrim) continue;
+        if (sTrim.length > maxChunkSize) {
+          let start = 0;
+          const step = maxChunkSize - (overlap > 0 && maxChunkSize > overlap ? overlap : 0);
+          while (start < sTrim.length) {
+            const slice = sTrim.slice(start, start + maxChunkSize).trim();
+            if (slice) segments.push(slice);
+            start += Math.max(1, step);
           }
-          for (let i = 0; i < p.length; i += maxChunkSize - overlap) {
-            sections.push(p.slice(i, i + maxChunkSize));
-          }
-        } else if ((currentParaGroup + "\n\n" + p).length <= maxChunkSize) {
-          currentParaGroup = currentParaGroup ? `${currentParaGroup}\n\n${p}` : p;
         } else {
-          if (currentParaGroup) sections.push(currentParaGroup);
-          currentParaGroup = p;
+          segments.push(sTrim);
         }
       }
-      if (currentParaGroup) sections.push(currentParaGroup);
     } else {
-      sections.push(sec);
+      segments.push(trimmed);
     }
   }
 
   const chunks: TextChunk[] = [];
-  let currentText = "";
+  let currentChunk = "";
   let chunkStartIndex = 0;
-  let runningCharOffset = 0;
+  let chunkIndex = 0;
 
-  for (const sec of sections) {
-    const candidate = currentText ? `${currentText}\n\n${sec}` : sec;
+  for (let i = 0; i < segments.length; i++) {
+    const seg = segments[i];
+    const prospectiveChunk = currentChunk ? `${currentChunk}\n\n${seg}` : seg;
 
-    if (candidate.length <= maxChunkSize) {
-      currentText = candidate;
+    if (prospectiveChunk.length <= maxChunkSize) {
+      currentChunk = prospectiveChunk;
     } else {
-      if (currentText) {
+      if (currentChunk) {
         chunks.push({
-          chunkIndex: chunks.length,
-          text: currentText.trim(),
+          chunkIndex,
+          text: currentChunk,
           charStart: chunkStartIndex,
-          charEnd: chunkStartIndex + currentText.length
+          charEnd: chunkStartIndex + currentChunk.length
         });
+        chunkIndex++;
 
-        // Compute overlap for sliding window
-        const overlapText = currentText.slice(Math.max(0, currentText.length - overlap));
-        currentText = `${overlapText}\n\n${sec}`;
-        chunkStartIndex = runningCharOffset - overlapText.length;
+        if (overlap > 0 && currentChunk.length > overlap) {
+          const overlapSlice = currentChunk.slice(-overlap).trim();
+          currentChunk = overlapSlice ? `${overlapSlice}\n\n${seg}` : seg;
+          chunkStartIndex = Math.max(0, chunkStartIndex + currentChunk.length - overlap);
+        } else {
+          currentChunk = seg;
+          chunkStartIndex = chunkStartIndex + currentChunk.length;
+        }
       } else {
-        chunks.push({
-          chunkIndex: chunks.length,
-          text: sec.trim(),
-          charStart: runningCharOffset,
-          charEnd: runningCharOffset + sec.length
-        });
-        currentText = "";
-        chunkStartIndex = runningCharOffset + sec.length;
+        let start = 0;
+        const step = maxChunkSize - (overlap > 0 && maxChunkSize > overlap ? overlap : 0);
+        while (start < seg.length) {
+          const slice = seg.slice(start, start + maxChunkSize).trim();
+          if (slice) {
+            chunks.push({
+              chunkIndex,
+              text: slice,
+              charStart: chunkStartIndex + start,
+              charEnd: chunkStartIndex + start + slice.length
+            });
+            chunkIndex++;
+          }
+          start += Math.max(1, step);
+        }
+        currentChunk = "";
+        chunkStartIndex += seg.length;
       }
     }
-
-    runningCharOffset += sec.length + 2;
   }
 
-  if (currentText && currentText.trim().length > 0) {
+  if (currentChunk.trim().length > 0) {
     chunks.push({
-      chunkIndex: chunks.length,
-      text: currentText.trim(),
+      chunkIndex,
+      text: currentChunk.trim(),
       charStart: chunkStartIndex,
-      charEnd: chunkStartIndex + currentText.length
+      charEnd: chunkStartIndex + currentChunk.trim().length
     });
   }
 

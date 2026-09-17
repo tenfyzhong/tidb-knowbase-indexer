@@ -32,6 +32,8 @@ export interface SyncResult {
 
 export interface SyncOptions {
   batchSize?: number;
+  gitDiff?: DiffResult;
+  commit?: string;
   lastCommit?: string;
 }
 
@@ -76,9 +78,10 @@ export async function syncSource(
 ): Promise<SyncResult> {
   core.info(`[${source.name}] Fetching previous sync state from TiDB...`);
   const prevState: SyncState = (await db.getSyncState(source.name)) || { files: {} };
+  const prevFiles = prevState.files || {};
 
   core.info(`[${source.name}] Calculating diff...`);
-  const diff = calculateDiff(prevState, currentDocs);
+  const diff = options.gitDiff ?? calculateDiff(prevState, currentDocs);
 
   core.info(
     `[${source.name}] Diff: +${diff.added.length}, ~${diff.modified.length}, -${diff.deleted.length}, =${diff.unchanged.length}`
@@ -87,19 +90,15 @@ export async function syncSource(
   const filesToProcess = [...diff.added, ...diff.modified];
   let skippedConfidentialCount = 0;
   const newChunksToUpsert: ChunkRecord[] = [];
-  const nextFilesState: Record<string, { hash: string; chunkCount: number; isConfidential?: boolean }> = {};
+  const nextFilesState: Record<string, { hash: string; chunkCount: number; isConfidential?: boolean }> = {
+    ...prevFiles
+  };
 
-  // Preserve unchanged files state
-  for (const unchangedPath of diff.unchanged) {
-    if (prevState.files[unchangedPath]) {
-      nextFilesState[unchangedPath] = prevState.files[unchangedPath];
-    }
-  }
-
-  // Handle deletions: remove chunks from TiDB for deleted files
+  // Remove deleted files from state and remove their chunks from TiDB
   for (const deletedPath of diff.deleted) {
     core.info(`[${source.name}] Removing deleted document chunks: ${deletedPath}`);
     await db.deleteChunksByPath(source.name, deletedPath);
+    delete nextFilesState[deletedPath];
   }
 
   // Process added and modified files
@@ -112,7 +111,6 @@ export async function syncSource(
       core.info(`[${source.name}] Skipping confidential note: ${filePath}`);
       skippedConfidentialCount++;
 
-      // If document was previously indexed and is now tagged confidential, delete old chunks
       if (diff.modified.includes(filePath)) {
         await db.deleteChunksByPath(source.name, filePath);
       }
@@ -125,7 +123,7 @@ export async function syncSource(
       continue;
     }
 
-    // If modified, clean up existing chunks before inserting new ones
+    // If modified, remove existing chunks before inserting new ones
     if (diff.modified.includes(filePath)) {
       await db.deleteChunksByPath(source.name, filePath);
     }
@@ -176,8 +174,9 @@ export async function syncSource(
   }
 
   // Save updated sync state in TiDB
+  const nextCommit = options.commit || options.lastCommit || prevState.lastCommit;
   const nextState: SyncState = {
-    lastCommit: options.lastCommit || prevState.lastCommit,
+    lastCommit: nextCommit,
     files: nextFilesState
   };
 
@@ -217,7 +216,8 @@ export async function runSync(config: Config, env: Env): Promise<SyncResult[]> {
         const gitResult = await loadGitDocuments(source, lastCommit);
 
         const result = await syncSource(source, gitResult.docs, db, embedder, {
-          lastCommit: gitResult.currentCommit
+          gitDiff: gitResult.diff,
+          commit: gitResult.currentCommit
         });
         results.push(result);
       } else if (source.type === "web") {
