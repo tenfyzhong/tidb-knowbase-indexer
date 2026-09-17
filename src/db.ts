@@ -1,3 +1,4 @@
+import { setTimeout as sleep } from "node:timers/promises";
 import fs from "node:fs";
 import mysql from "mysql2/promise";
 import type { Env } from "./config.js";
@@ -165,45 +166,94 @@ export class TiDBClient {
   async upsertChunks(chunks: ChunkRecord[]): Promise<number> {
     if (chunks.length === 0) return 0;
 
-    const batchSize = 50;
+    const batchSize = 10;
     let totalUpserted = 0;
 
     for (let i = 0; i < chunks.length; i += batchSize) {
       const batch = chunks.slice(i, i + batchSize);
-      const valuesPlaceholders: string[] = [];
-      const queryParams: unknown[] = [];
-
-      for (const item of batch) {
-        valuesPlaceholders.push("(?, ?, ?, ?, ?, ?, ?)");
-        queryParams.push(
-          item.id,
-          item.text,
-          item.source,
-          item.path,
-          item.title ?? null,
-          item.chunkIndex,
-          item.url ?? null
-        );
-      }
-
-      const sql = `
-        INSERT INTO chunks (id, text, source, path, title, chunk_index, url)
-        VALUES ${valuesPlaceholders.join(", ")}
-        ON DUPLICATE KEY UPDATE
-          text = VALUES(text),
-          source = VALUES(source),
-          path = VALUES(path),
-          title = VALUES(title),
-          chunk_index = VALUES(chunk_index),
-          url = VALUES(url),
-          updated_at = CURRENT_TIMESTAMP
-      `;
-
-      await this.pool.query(sql, queryParams);
-      totalUpserted += batch.length;
+      const count = await this.insertBatchWithRetry(batch);
+      totalUpserted += count;
     }
 
     return totalUpserted;
+  }
+
+  private async insertBatchWithRetry(batch: ChunkRecord[]): Promise<number> {
+    const validBatch = batch.filter((item) => item.text && item.text.replace(/\0/g, "").trim().length > 0);
+    if (validBatch.length === 0) return 0;
+
+    let attempts = 0;
+    const maxAttempts = 5;
+
+    while (attempts < maxAttempts) {
+      attempts++;
+      try {
+        const valuesPlaceholders: string[] = [];
+        const queryParams: unknown[] = [];
+
+        for (const item of validBatch) {
+          const cleaned = item.text.replace(/\0/g, "").trim();
+          const safeText = cleaned.length > 2500 ? cleaned.slice(0, 2500) : cleaned;
+
+          valuesPlaceholders.push("(?, ?, ?, ?, ?, ?, ?)");
+          queryParams.push(
+            item.id,
+            safeText,
+            item.source,
+            item.path,
+            item.title ?? null,
+            item.chunkIndex,
+            item.url ?? null
+          );
+        }
+
+        const sql = `
+          INSERT INTO chunks (id, text, source, path, title, chunk_index, url)
+          VALUES ${valuesPlaceholders.join(", ")}
+          ON DUPLICATE KEY UPDATE
+            text = VALUES(text),
+            source = VALUES(source),
+            path = VALUES(path),
+            title = VALUES(title),
+            chunk_index = VALUES(chunk_index),
+            url = VALUES(url),
+            updated_at = CURRENT_TIMESTAMP
+        `;
+
+        await this.pool.query(sql, queryParams);
+        return validBatch.length;
+      } catch (err) {
+        const errMsg = String(err);
+        const isTransient =
+          errMsg.includes("Bedrock") ||
+          errMsg.includes("Too Many Requests") ||
+          errMsg.includes("rate") ||
+          errMsg.includes("503") ||
+          errMsg.includes("timeout") ||
+          errMsg.includes("deadlock");
+
+        if (isTransient && attempts < maxAttempts) {
+          const delayMs = attempts * 1500 + Math.floor(Math.random() * 500);
+          await sleep(delayMs);
+          continue;
+        }
+
+        // Fallback to single-item insertion if batch had multiple items
+        if (validBatch.length > 1) {
+          let singleUpserted = 0;
+          for (const item of validBatch) {
+            singleUpserted += await this.insertBatchWithRetry([item]);
+          }
+          return singleUpserted;
+        }
+
+        // If a single row fails persistently, log and skip rather than crashing the entire sync
+        console.warn(`[WARN] Skipping chunk ${validBatch[0]?.id} due to persistent error: ${errMsg}`);
+        return 0;
+      }
+    }
+
+    return 0;
   }
 
   async deleteChunksByIds(ids: string[]): Promise<number> {
