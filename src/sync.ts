@@ -1,7 +1,6 @@
 import * as core from "@actions/core";
 import type { Config, Env, Source } from "./config.js";
 import { TiDBClient, type ChunkRecord, type SyncState } from "./db.js";
-import { createEmbeddingProvider, type EmbeddingProvider } from "./embedding.js";
 import { chunkText, generateVectorId, hasConfidentialTag } from "./chunker.js";
 import { loadGitDocuments } from "./sources/git.js";
 import { loadWebDocuments } from "./sources/web.js";
@@ -68,12 +67,10 @@ export function calculateDiff(
 
   return { added, modified, deleted, unchanged };
 }
-
 export async function syncSource(
   source: Source,
   currentDocs: Map<string, DocumentItem>,
   db: TiDBClient,
-  embedder?: EmbeddingProvider | null,
   options: SyncOptions = {}
 ): Promise<SyncResult> {
   core.info(`[${source.name}] Fetching previous sync state from TiDB...`);
@@ -127,16 +124,10 @@ export async function syncSource(
     if (diff.modified.includes(filePath)) {
       await db.deleteChunksByPath(source.name, filePath);
     }
-
     const textChunks = chunkText(doc.content);
-    const chunkTexts: string[] = [];
-    const pendingRecords: Omit<ChunkRecord, "embedding">[] = [];
-
-    for (let idx = 0; idx < textChunks.length; idx++) {
-      const chunk = textChunks[idx];
+    for (const chunk of textChunks) {
       const vectorId = generateVectorId(source.name, filePath, chunk.chunkIndex);
-
-      pendingRecords.push({
+      newChunksToUpsert.push({
         id: vectorId,
         text: chunk.text,
         source: source.name,
@@ -145,24 +136,6 @@ export async function syncSource(
         chunkIndex: chunk.chunkIndex,
         url: source.type === "web" ? filePath : undefined
       });
-      chunkTexts.push(chunk.text);
-    }
-
-    if (chunkTexts.length > 0) {
-      if (embedder) {
-        core.info(`[${source.name}] Generating embeddings for ${filePath} (${chunkTexts.length} chunks)...`);
-        const embeddings = await embedder.embed(chunkTexts);
-        for (let i = 0; i < pendingRecords.length; i++) {
-          newChunksToUpsert.push({
-            ...pendingRecords[i],
-            embedding: embeddings[i]
-          });
-        }
-      } else {
-        for (const rec of pendingRecords) {
-          newChunksToUpsert.push(rec);
-        }
-      }
     }
 
     nextFilesState[filePath] = {
@@ -200,10 +173,8 @@ export async function syncSource(
     skippedConfidentialCount
   };
 }
-
 export async function runSync(config: Config, env: Env): Promise<SyncResult[]> {
   const db = new TiDBClient(env);
-  const embedder = env.EMBEDDING_PROVIDER === "auto" ? null : createEmbeddingProvider(env);
   const results: SyncResult[] = [];
 
   try {
@@ -218,8 +189,7 @@ export async function runSync(config: Config, env: Env): Promise<SyncResult[]> {
 
         core.info(`Loading Git documents from ${source.url} (branch: ${source.branch})...`);
         const gitResult = await loadGitDocuments(source, lastCommit);
-
-        const result = await syncSource(source, gitResult.docs, db, embedder, {
+        const result = await syncSource(source, gitResult.docs, db, {
           gitDiff: gitResult.diff,
           commit: gitResult.currentCommit
         });
@@ -227,9 +197,7 @@ export async function runSync(config: Config, env: Env): Promise<SyncResult[]> {
       } else if (source.type === "web") {
         core.info(`Crawling web documents from ${source.url}...`);
         const webDocs = await loadWebDocuments(source);
-
-        const result = await syncSource(source, webDocs, db, embedder);
-        results.push(result);
+        const result = await syncSource(source, webDocs, db);
       }
     }
 

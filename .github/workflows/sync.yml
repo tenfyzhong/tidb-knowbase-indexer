@@ -47,12 +47,5 @@ jobs:
           TIDB_USER: ${{ secrets.TIDB_USER }}
           TIDB_PASSWORD: ${{ secrets.TIDB_PASSWORD }}
           TIDB_DATABASE: ${{ secrets.TIDB_DATABASE }}
-          EMBEDDING_PROVIDER: ${{ vars.EMBEDDING_PROVIDER || 'auto' }}
-          AUTO_EMBEDDING_MODEL: ${{ vars.AUTO_EMBEDDING_MODEL || 'tidbcloud_free/amazon/titan-embed-text-v2' }}
-          AUTO_EMBEDDING_DIMENSION: ${{ vars.AUTO_EMBEDDING_DIMENSION || '1024' }}
-          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY || secrets.OPENAI_API_KEY }}
-          EMBEDDING_BASE_URL: ${{ vars.EMBEDDING_BASE_URL || 'https://api.siliconflow.cn/v1' }}
-          EMBEDDING_MODEL: ${{ vars.EMBEDDING_MODEL || 'BAAI/bge-m3' }}
-          EMBEDDING_DIMENSION: ${{ vars.EMBEDDING_DIMENSION || '1024' }}
           GH_PAT: ${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}
         run: node dist/index.js

@@ -54,20 +54,6 @@ export const EnvSchema = z.object({
     return val ?? true;
   }, z.boolean()).default(true),
   TIDB_CA: z.string().optional(),
-  // TiDB Cloud native Auto Embedding configuration
-  AUTO_EMBEDDING_MODEL: z.string().default("tidbcloud_free/amazon/titan-embed-text-v2"),
-  AUTO_EMBEDDING_DIMENSION: z.coerce.number().int().default(1024),
-
-  // Optional external embedding provider configuration
-  EMBEDDING_PROVIDER: z.enum(["auto", "openai", "huggingface", "gemini", "mock"]).default("auto"),
-  EMBEDDING_API_KEY: z.string().optional(),
-  OPENAI_API_KEY: z.string().optional(),
-  HF_TOKEN: z.string().optional(),
-  GEMINI_API_KEY: z.string().optional(),
-  EMBEDDING_BASE_URL: z.string().default("https://api.siliconflow.cn/v1"),
-  EMBEDDING_MODEL: z.string().default("BAAI/bge-m3"),
-  EMBEDDING_DIMENSION: z.coerce.number().int().default(1024),
-
   // Git authentication
   GH_PAT: z.string().optional(),
   GH_TOKEN: z.string().optional(),
@@ -112,10 +98,6 @@ export function sanitizeLogs(config: Config, env: Env): void {
   if (env.TIDB_DATABASE_URL) secretsToMask.push(env.TIDB_DATABASE_URL);
   if (env.DATABASE_URL) secretsToMask.push(env.DATABASE_URL);
   if (env.TIDB_PASSWORD) secretsToMask.push(env.TIDB_PASSWORD);
-  if (env.EMBEDDING_API_KEY) secretsToMask.push(env.EMBEDDING_API_KEY);
-  if (env.OPENAI_API_KEY) secretsToMask.push(env.OPENAI_API_KEY);
-  if (env.HF_TOKEN) secretsToMask.push(env.HF_TOKEN);
-  if (env.GEMINI_API_KEY) secretsToMask.push(env.GEMINI_API_KEY);
   if (env.GH_PAT) secretsToMask.push(env.GH_PAT);
   if (env.GH_TOKEN) secretsToMask.push(env.GH_TOKEN);
   if (env.GITHUB_TOKEN) secretsToMask.push(env.GITHUB_TOKEN);

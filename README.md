@@ -5,12 +5,12 @@ Automated incremental knowledge base indexer with native TiDB Cloud Auto Embeddi
 ## Overview
 
 `tidb-knowbase-indexer` synchronizes documents periodically via GitHub Actions (or locally) from multiple sources directly into TiDB Cloud:
-- **TiDB Cloud Native Auto Embedding**: Leverages TiDB Cloud's native `EMBED_TEXT()` generated stored column (`tidbcloud_free/amazon/titan-embed-text-v2`). Plain text is inserted, and TiDB automatically generates and stores 1024-dimensional embeddings on the server side—**completely eliminating the need for any external embedding model API keys or local ML dependencies**.
+- **TiDB Cloud Native Auto Embedding**: Leverages TiDB Cloud's native `EMBED_TEXT()` generated stored column (`tidbcloud_free/amazon/titan-embed-text-v2`). Plain text chunks are inserted, and TiDB automatically generates and stores 1024-dimensional vector embeddings on the server side—**completely eliminating the need for any external embedding model API keys or local ML dependencies**.
 - **Private & Public Git Repositories**: Incremental indexing based on Git commit diffs (`git diff <lastCommit> HEAD`). Automatically supports token-based authentication for private repositories without needing SSH keys.
 - **Websites & Blogs**: Recursively crawls web pages and extracts clean content.
 - **Privacy Filter (`#confidential`)**: Automatically skips Markdown notes tagged with `#confidential` (in YAML frontmatter or inline body text), preventing sensitive notes from being indexed.
 - **Enforced TLS Security**: Enforces TLS 1.2+ with certificate validation for all connections to TiDB Cloud Serverless.
-- **Zero-Cost Architecture**: Runs on GitHub Actions free tier, uses TiDB Cloud Starter (free 5 GiB storage and 50M Request Units/month), requiring **zero external embedding API costs**.
+- **Zero-Cost Architecture**: Runs on GitHub Actions free tier and uses TiDB Cloud Starter (free 5 GiB storage and 50M Request Units/month), requiring **zero external embedding API costs**.
 - **Log Sanitization**: Uses GitHub Actions secret masking (`@actions/core.setSecret`) to prevent leakage of database credentials, private URLs, and tokens into execution logs.
 
 ## Architecture
@@ -36,11 +36,11 @@ Automated incremental knowledge base indexer with native TiDB Cloud Auto Embeddi
 ## Free Tier Setup
 
 1. **TiDB Cloud Starter (100% Free)**:
-   - Sign up for [TiDB Cloud](https://tidbcloud.com/) and create a free Serverless (Starter) cluster.
+   - Sign up for [TiDB Cloud](https://tidbcloud.com/) and create a free Serverless (Starter) cluster on AWS (e.g. `us-east-1`).
    - Obtain your connection string from the cluster overview page (`mysql://...`).
-2. **Native Auto Embedding (No API Keys Needed)**:
-   - By default, uses TiDB Cloud's built-in `tidbcloud_free/amazon/titan-embed-text-v2` model.
-   - You do **not** need to register or configure any external embedding API key!
+2. **Zero Model Configuration**:
+   - TiDB Cloud automatically handles vector embedding in the cloud via `EMBED_TEXT()`.
+   - **No external AI accounts, tokens, or API keys are required.**
 3. **GitHub Actions**:
    - Runs automatically on the GitHub Actions free tier.
 
@@ -59,7 +59,6 @@ Configure these in the **Secrets** tab:
 | `CONFIG_JSON` | **Yes** | JSON array configuring data sources (Git repositories or Web URLs). | `[{"name":"notes","type":"git","url":"..."}]` |
 | `TIDB_DATABASE_URL` | **Yes** | Connection string for TiDB Cloud Starter. TLS 1.2+ is enforced automatically. | `mysql://<user>:<password>@gateway.tidbcloud.com:4000/test?ssl={"minVersion":"TLSv1.2"}` |
 | `GH_PAT` | Optional | GitHub Personal Access Token with repository read permissions for private Git sources. | `ghp_...` |
-| `EMBEDDING_API_KEY` | Optional | Only needed if switching to custom external embedding providers (`openai`, `huggingface`, `gemini`). | `sk-...` |
 | `TIDB_HOST` | Optional | TiDB host address (alternative if `TIDB_DATABASE_URL` is omitted). | `gateway01.us-east-1.prod.aws.tidbcloud.com` |
 | `TIDB_PORT` | Optional | TiDB port (defaults to `4000`). | `4000` |
 | `TIDB_USER` | Optional | TiDB username (alternative if `TIDB_DATABASE_URL` is omitted). | `xxxxxx.root` |
@@ -68,13 +67,10 @@ Configure these in the **Secrets** tab:
 
 ### 2. Repository Variables (Non-Sensitive Configuration)
 
-Configure these in the **Variables** tab:
+Configure these in the **Variables** tab (optional):
 
-| Variable Name | Required | Default | Allowed Values / Description |
+| Variable Name | Required | Default | Description |
 |---|:---:|:---:|---|
-| `EMBEDDING_PROVIDER` | No | `auto` | `auto` (native TiDB Cloud Auto Embedding, zero keys), `openai`, `huggingface`, `gemini`, `mock` |
-| `AUTO_EMBEDDING_MODEL` | No | `tidbcloud_free/amazon/titan-embed-text-v2` | TiDB Cloud native embedding model. |
-| `AUTO_EMBEDDING_DIMENSION` | No | `1024` | Native embedding dimension. |
 | `TIDB_SSL` | No | `true` | Enforces TLS connection to TiDB Cloud. |
 | `TIDB_SSL_REJECT_UNAUTHORIZED` | No | `true` | Validates server CA certificate against trusted root CAs. |
 

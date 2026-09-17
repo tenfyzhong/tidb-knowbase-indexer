@@ -55,9 +55,6 @@ describe("config", () => {
 
       const env = parseEnv(rawEnv);
       expect(env.TIDB_DATABASE_URL).toBe(rawEnv.TIDB_DATABASE_URL);
-      expect(env.EMBEDDING_PROVIDER).toBe("auto");
-      expect(env.EMBEDDING_MODEL).toBe("BAAI/bge-m3");
-      expect(env.EMBEDDING_DIMENSION).toBe(1024);
     });
 
     it("should parse env with host and user", () => {
@@ -67,8 +64,6 @@ describe("config", () => {
         TIDB_USER: "root",
         TIDB_PASSWORD: "secretpassword",
         TIDB_DATABASE: "my_kb",
-        EMBEDDING_PROVIDER: "mock",
-        EMBEDDING_DIMENSION: "768"
       };
 
       const env = parseEnv(rawEnv);
@@ -77,8 +72,6 @@ describe("config", () => {
       expect(env.TIDB_USER).toBe("root");
       expect(env.TIDB_PASSWORD).toBe("secretpassword");
       expect(env.TIDB_DATABASE).toBe("my_kb");
-      expect(env.EMBEDDING_PROVIDER).toBe("mock");
-      expect(env.EMBEDDING_DIMENSION).toBe(768);
     });
 
     it("should throw error when database settings are missing", () => {
@@ -135,7 +128,6 @@ describe("config", () => {
       const env = parseEnv({
         TIDB_DATABASE_URL: "mysql://user:pass12345@gateway.tidbcloud.com:4000/test",
         TIDB_PASSWORD: "secret_db_password",
-        EMBEDDING_API_KEY: "sk-embedding-secret",
         GH_PAT: "ghp_pat_secret_987"
       });
 
@@ -143,7 +135,6 @@ describe("config", () => {
 
       expect(setSecretSpy).toHaveBeenCalledWith("mysql://user:pass12345@gateway.tidbcloud.com:4000/test");
       expect(setSecretSpy).toHaveBeenCalledWith("secret_db_password");
-      expect(setSecretSpy).toHaveBeenCalledWith("sk-embedding-secret");
       expect(setSecretSpy).toHaveBeenCalledWith("ghp_pat_secret_987");
       expect(setSecretSpy).toHaveBeenCalledWith("ghp_secret_token_value_123");
     });

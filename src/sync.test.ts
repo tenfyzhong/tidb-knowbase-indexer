@@ -2,7 +2,6 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { calculateDiff, syncSource, type DocumentItem } from "./sync.js";
 import type { GitSource } from "./config.js";
 import type { TiDBClient, SyncState, ChunkRecord } from "./db.js";
-import { MockEmbeddingProvider } from "./embedding.js";
 
 describe("sync", () => {
   describe("calculateDiff", () => {
@@ -30,7 +29,6 @@ describe("sync", () => {
   });
 
   describe("syncSource", () => {
-    const embedder = new MockEmbeddingProvider(128);
 
     const sampleSource: GitSource = {
       name: "test-notes",
@@ -78,8 +76,7 @@ describe("sync", () => {
           }
         ]
       ]);
-
-      const result = await syncSource(sampleSource, docs, mockDb, embedder);
+      const result = await syncSource(sampleSource, docs, mockDb);
 
       expect(result.addedCount).toBe(1);
       expect(result.modifiedCount).toBe(0);
@@ -91,40 +88,10 @@ describe("sync", () => {
       expect(upsertedChunks).toHaveLength(1);
       expect(upsertedChunks[0].source).toBe("test-notes");
       expect(upsertedChunks[0].path).toBe("guide.md");
-      expect(upsertedChunks[0].embedding).toHaveLength(128);
-
       expect(mockSaveSyncState).toHaveBeenCalledTimes(1);
       const savedState = mockSaveSyncState.mock.calls[0][1] as SyncState;
       expect(savedState.files["guide.md"].hash).toBe("h_guide");
       expect(savedState.files["guide.md"].chunkCount).toBe(1);
-    });
-
-    it("should process added files with TiDB Auto Embedding when no embedder is provided", async () => {
-      mockGetSyncState.mockResolvedValue(null);
-
-      const docs = new Map<string, DocumentItem>([
-        [
-          "guide.md",
-          {
-            path: "guide.md",
-            hash: "h_guide",
-            content: "# Guide\nThis is an introduction.",
-            title: "guide"
-          }
-        ]
-      ]);
-
-      const result = await syncSource(sampleSource, docs, mockDb, null);
-
-      expect(result.addedCount).toBe(1);
-      expect(result.totalChunks).toBe(1);
-      expect(mockUpsertChunks).toHaveBeenCalledTimes(1);
-
-      const upsertedChunks = mockUpsertChunks.mock.calls[0][0] as ChunkRecord[];
-      expect(upsertedChunks).toHaveLength(1);
-      expect(upsertedChunks[0].source).toBe("test-notes");
-      expect(upsertedChunks[0].path).toBe("guide.md");
-      expect(upsertedChunks[0].embedding).toBeUndefined();
     });
 
     it("should delete chunks for removed files", async () => {
@@ -135,7 +102,7 @@ describe("sync", () => {
       });
 
       const docs = new Map<string, DocumentItem>();
-      const result = await syncSource(sampleSource, docs, mockDb, embedder);
+      const result = await syncSource(sampleSource, docs, mockDb);
 
       expect(result.deletedCount).toBe(1);
       expect(mockDeleteChunksByPath).toHaveBeenCalledWith("test-notes", "old.md");
@@ -160,7 +127,7 @@ describe("sync", () => {
         ]
       ]);
 
-      const result = await syncSource(sampleSource, docs, mockDb, embedder);
+      const result = await syncSource(sampleSource, docs, mockDb);
 
       expect(result.skippedConfidentialCount).toBe(1);
       expect(mockDeleteChunksByPath).toHaveBeenCalledWith("test-notes", "private.md");
