@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import mysql from "mysql2/promise";
 import type { Env } from "./config.js";
 
@@ -36,7 +37,19 @@ export function resolveSslOptions(env: Env): mysql.SslOptions | undefined {
   };
 
   if (env.TIDB_CA) {
-    ssl.ca = env.TIDB_CA;
+    if (env.TIDB_CA.includes("-----BEGIN CERTIFICATE-----")) {
+      ssl.ca = env.TIDB_CA;
+    } else {
+      try {
+        if (fs.existsSync(env.TIDB_CA)) {
+          ssl.ca = fs.readFileSync(env.TIDB_CA, "utf-8");
+        } else {
+          ssl.ca = env.TIDB_CA;
+        }
+      } catch {
+        ssl.ca = env.TIDB_CA;
+      }
+    }
   }
 
   return ssl;
