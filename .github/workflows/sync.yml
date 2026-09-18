@@ -49,11 +49,11 @@ jobs:
           TIDB_DATABASE: ${{ secrets.TIDB_DATABASE }}
           GH_PAT: ${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}
           EMBEDDING_PROVIDER: ${{ secrets.EMBEDDING_PROVIDER || vars.EMBEDDING_PROVIDER }}
-          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY || secrets.OPENAI_API_KEY }}
-          EMBEDDING_BASE_URL: ${{ secrets.EMBEDDING_BASE_URL || vars.EMBEDDING_BASE_URL }}
-          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL || vars.EMBEDDING_MODEL }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN || secrets.CLOUDFLARE_API_KEY || secrets.EMBEDDING_API_KEY }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID || vars.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_BASE_URL: ${{ secrets.CLOUDFLARE_BASE_URL || vars.CLOUDFLARE_BASE_URL || secrets.EMBEDDING_BASE_URL || vars.EMBEDDING_BASE_URL }}
+          CLOUDFLARE_MODEL: ${{ secrets.CLOUDFLARE_MODEL || vars.CLOUDFLARE_MODEL || secrets.EMBEDDING_MODEL || vars.EMBEDDING_MODEL }}
           EMBEDDING_DIMENSION: ${{ secrets.EMBEDDING_DIMENSION || vars.EMBEDDING_DIMENSION }}
-          HF_TOKEN: ${{ secrets.HF_TOKEN }}
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
+          AUTO_EMBEDDING_MODEL: ${{ secrets.AUTO_EMBEDDING_MODEL || vars.AUTO_EMBEDDING_MODEL }}
+          AUTO_EMBEDDING_DIMENSION: ${{ secrets.AUTO_EMBEDDING_DIMENSION || vars.AUTO_EMBEDDING_DIMENSION }}
         run: node dist/index.js

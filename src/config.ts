@@ -56,17 +56,20 @@ export const EnvSchema = z.object({
   TIDB_CA: z.string().optional(),
   // Embedding settings
   EMBEDDING_PROVIDER: z
-    .enum(["openai", "siliconflow", "huggingface", "gemini", "jina", "tidb_auto", "auto", "mock"])
-    .optional(),
+    .enum(["cloudflare", "cf", "tidb_auto", "auto", "mock"])
+    .optional()
+    .default("cloudflare"),
+  CLOUDFLARE_API_TOKEN: z.string().optional(),
+  CLOUDFLARE_API_KEY: z.string().optional(),
+  CLOUDFLARE_ACCOUNT_ID: z.string().optional(),
+  CLOUDFLARE_BASE_URL: z.string().optional(),
+  CLOUDFLARE_MODEL: z.string().optional(),
   EMBEDDING_API_KEY: z.string().optional(),
-  OPENAI_API_KEY: z.string().optional(),
-  HF_TOKEN: z.string().optional(),
-  GEMINI_API_KEY: z.string().optional(),
-  JINA_API_KEY: z.string().optional(),
   EMBEDDING_BASE_URL: z.string().optional(),
   EMBEDDING_MODEL: z.string().optional(),
   EMBEDDING_DIMENSION: z.coerce.number().int().positive().optional(),
-  // Git authentication
+  AUTO_EMBEDDING_MODEL: z.string().optional(),
+  AUTO_EMBEDDING_DIMENSION: z.coerce.number().int().positive().optional(),
   GH_PAT: z.string().optional(),
   GH_TOKEN: z.string().optional(),
   GITHUB_TOKEN: z.string().optional()
@@ -112,12 +115,10 @@ export function sanitizeLogs(config: Config, env: Env): void {
   if (env.GH_PAT) secretsToMask.push(env.GH_PAT);
   if (env.GH_TOKEN) secretsToMask.push(env.GH_TOKEN);
   if (env.GITHUB_TOKEN) secretsToMask.push(env.GITHUB_TOKEN);
+  if (env.CLOUDFLARE_API_TOKEN) secretsToMask.push(env.CLOUDFLARE_API_TOKEN);
+  if (env.CLOUDFLARE_API_KEY) secretsToMask.push(env.CLOUDFLARE_API_KEY);
+  if (env.CLOUDFLARE_ACCOUNT_ID) secretsToMask.push(env.CLOUDFLARE_ACCOUNT_ID);
   if (env.EMBEDDING_API_KEY) secretsToMask.push(env.EMBEDDING_API_KEY);
-  if (env.OPENAI_API_KEY) secretsToMask.push(env.OPENAI_API_KEY);
-  if (env.HF_TOKEN) secretsToMask.push(env.HF_TOKEN);
-  if (env.GEMINI_API_KEY) secretsToMask.push(env.GEMINI_API_KEY);
-  if (env.JINA_API_KEY) secretsToMask.push(env.JINA_API_KEY);
-
   for (const source of config) {
     if (source.type === "git" && source.token) {
       secretsToMask.push(source.token);
