@@ -95,6 +95,39 @@ describe("config", () => {
       expect(env.CLOUDFLARE_MODEL).toBe("@cf/baai/bge-m3");
       expect(env.EMBEDDING_DIMENSION).toBe(1024);
     });
+
+    it("safely handles empty strings from GitHub Actions secrets and variables", () => {
+      const rawEnv = {
+        TIDB_DATABASE_URL: "mysql://user:pass@gateway.tidbcloud.com:4000/test",
+        TIDB_HOST: "",
+        TIDB_PORT: "",
+        TIDB_USER: "",
+        TIDB_PASSWORD: "",
+        TIDB_DATABASE: "",
+        EMBEDDING_PROVIDER: "",
+        CLOUDFLARE_API_TOKEN: "cf-token",
+        CLOUDFLARE_ACCOUNT_ID: "cf-acc",
+        CLOUDFLARE_BASE_URL: "",
+        CLOUDFLARE_MODEL: "",
+        EMBEDDING_API_KEY: "",
+        EMBEDDING_BASE_URL: "",
+        EMBEDDING_MODEL: "",
+        EMBEDDING_DIMENSION: "",
+        AUTO_EMBEDDING_MODEL: "",
+        AUTO_EMBEDDING_DIMENSION: "",
+        GH_PAT: ""
+      };
+
+      const env = parseEnv(rawEnv);
+      expect(env.TIDB_DATABASE_URL).toBe("mysql://user:pass@gateway.tidbcloud.com:4000/test");
+      expect(env.TIDB_HOST).toBeUndefined();
+      expect(env.TIDB_PORT).toBe(4000);
+      expect(env.TIDB_DATABASE).toBe("test");
+      expect(env.EMBEDDING_PROVIDER).toBe("cloudflare");
+      expect(env.EMBEDDING_DIMENSION).toBeUndefined();
+      expect(env.AUTO_EMBEDDING_DIMENSION).toBeUndefined();
+      expect(env.AUTO_EMBEDDING_MODEL).toBeUndefined();
+    });
   });
 
     it("should configure TLS with minimum TLSv1.2 by default", () => {
