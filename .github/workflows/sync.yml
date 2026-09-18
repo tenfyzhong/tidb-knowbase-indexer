@@ -48,4 +48,12 @@ jobs:
           TIDB_PASSWORD: ${{ secrets.TIDB_PASSWORD }}
           TIDB_DATABASE: ${{ secrets.TIDB_DATABASE }}
           GH_PAT: ${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}
+          EMBEDDING_PROVIDER: ${{ secrets.EMBEDDING_PROVIDER || vars.EMBEDDING_PROVIDER }}
+          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY || secrets.OPENAI_API_KEY }}
+          EMBEDDING_BASE_URL: ${{ secrets.EMBEDDING_BASE_URL || vars.EMBEDDING_BASE_URL }}
+          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL || vars.EMBEDDING_MODEL }}
+          EMBEDDING_DIMENSION: ${{ secrets.EMBEDDING_DIMENSION || vars.EMBEDDING_DIMENSION }}
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
         run: node dist/index.js
