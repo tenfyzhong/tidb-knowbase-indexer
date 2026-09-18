@@ -1,18 +1,20 @@
 # tidb-knowbase-indexer
 
-Automated incremental knowledge base indexer with native TiDB Cloud Auto Embedding and vector storage.
+Automated incremental knowledge base indexer with flexible embedding providers (SiliconFlow, Hugging Face, Gemini, OpenAI, Jina, and TiDB Cloud native Auto Embedding) and vector storage.
 
 ## Overview
 
 `tidb-knowbase-indexer` synchronizes documents periodically via GitHub Actions (or locally) from multiple sources directly into TiDB Cloud:
-- **TiDB Cloud Native Auto Embedding**: Leverages TiDB Cloud's native `EMBED_TEXT()` generated stored column (`tidbcloud_free/amazon/titan-embed-text-v2`). Plain text chunks are inserted, and TiDB automatically generates and stores 1024-dimensional vector embeddings on the server side—**completely eliminating the need for any external embedding model API keys or local ML dependencies**.
+- **Flexible Embedding Providers**:
+  - **PingCAP Cloud China (`console.cloud.pingkai.cn`)**: Seamlessly connects to SiliconFlow (硅基流动 `https://api.siliconflow.cn/v1`) with completely free `BAAI/bge-m3` (1024-dim) or `BAAI/bge-large-zh-v1.5`, Hugging Face Inference API, Google Gemini, or Jina AI.
+  - **TiDB Cloud Global (`tidbcloud.com` on AWS)**: Supports zero-key serverless `EMBED_TEXT("tidbcloud_free/amazon/titan-embed-text-v2", text)` via `EMBEDDING_PROVIDER=tidb_auto`, as well as client-side embedding providers.
+  - **Self-Healing Schema Migration**: Automatically detects if the table uses an Auto Embedding generated column or client-side `VECTOR(dim)` column and re-provisions cleanly if switching modes.
 - **Private & Public Git Repositories**: Incremental indexing based on Git commit diffs (`git diff <lastCommit> HEAD`). Automatically supports token-based authentication for private repositories without needing SSH keys.
 - **Websites & Blogs**: Recursively crawls web pages and extracts clean content.
 - **Privacy Filter (`#confidential`)**: Automatically skips Markdown notes tagged with `#confidential` (in YAML frontmatter or inline body text), preventing sensitive notes from being indexed.
 - **Enforced TLS Security**: Enforces TLS 1.2+ with certificate validation for all connections to TiDB Cloud Serverless.
-- **Zero-Cost Architecture**: Runs on GitHub Actions free tier and uses TiDB Cloud Starter (free 5 GiB storage and 50M Request Units/month), requiring **zero external embedding API costs**.
+- **Zero-Cost Architecture**: Runs on GitHub Actions free tier and uses TiDB Cloud Starter (free 5 GiB storage and 50M Request Units/month).
 - **Log Sanitization**: Uses GitHub Actions secret masking (`@actions/core.setSecret`) to prevent leakage of database credentials, private URLs, and tokens into execution logs.
-
 ## Architecture
 
 ```
@@ -35,15 +37,28 @@ Automated incremental knowledge base indexer with native TiDB Cloud Auto Embeddi
 
 ## Free Tier Setup
 
-1. **TiDB Cloud Starter (100% Free)**:
-   - Sign up for [TiDB Cloud](https://tidbcloud.com/) and create a free Serverless (Starter) cluster on AWS (e.g. `us-east-1`).
-   - Obtain your connection string from the cluster overview page (`mysql://...`).
-2. **Zero Model Configuration**:
-   - TiDB Cloud automatically handles vector embedding in the cloud via `EMBED_TEXT()`.
-   - **No external AI accounts, tokens, or API keys are required.**
-3. **GitHub Actions**:
-   - Runs automatically on the GitHub Actions free tier.
+### Scenario A: PingCAP Cloud China (`console.cloud.pingkai.cn`)
 
+PingCAP Cloud China clusters do not support `tidbcloud_free` (Bedrock). You can achieve 100% free vector indexing using **SiliconFlow (硅基流动)**:
+
+1. Register at [SiliconFlow](https://siliconflow.cn/) and get a free API Key.
+2. Set GitHub Secrets / Variables:
+   - `EMBEDDING_PROVIDER`: `openai` (or leave default)
+   - `EMBEDDING_BASE_URL`: `https://api.siliconflow.cn/v1`
+   - `EMBEDDING_MODEL`: `BAAI/bge-m3`
+   - `EMBEDDING_DIMENSION`: `1024`
+   - `EMBEDDING_API_KEY`: Your SiliconFlow API Key (`sk-...`)
+
+### Scenario B: TiDB Cloud Global (`tidbcloud.com` on AWS)
+
+Global AWS clusters support built-in zero-configuration Auto Embedding:
+1. Set `EMBEDDING_PROVIDER`: `tidb_auto`
+2. No embedding API key is required!
+
+### Scenario C: Hugging Face / Gemini / Jina
+- **Hugging Face**: Set `HF_TOKEN` and optional `EMBEDDING_MODEL` (e.g. `BAAI/bge-m3`).
+- **Google Gemini**: Set `GEMINI_API_KEY` (defaults to `text-embedding-004`, 768 dim).
+- **Jina AI**: Set `JINA_API_KEY` (defaults to `jina-embeddings-v3`, 1024 dim).
 ---
 
 ## GitHub Actions Workflows & Parameters
@@ -58,22 +73,29 @@ Configure these in the **Secrets** tab:
 |---|:---:|---|---|
 | `CONFIG_JSON` | **Yes** | JSON array configuring data sources (Git repositories or Web URLs). | `[{"name":"notes","type":"git","url":"..."}]` |
 | `TIDB_DATABASE_URL` | **Yes** | Connection string for TiDB Cloud Starter. TLS 1.2+ is enforced automatically. | `mysql://<user>:<password>@gateway.tidbcloud.com:4000/test?ssl={"minVersion":"TLSv1.2"}` |
+| `EMBEDDING_API_KEY` | Optional | API key for embedding provider (e.g. SiliconFlow, OpenAI). | `sk-...` |
+| `HF_TOKEN` | Optional | Hugging Face User Access Token. | `hf_...` |
+| `GEMINI_API_KEY` | Optional | Google Gemini API Key. | `AIza...` |
+| `JINA_API_KEY` | Optional | Jina AI API Key. | `jina_...` |
 | `GH_PAT` | Optional | GitHub Personal Access Token with repository read permissions for private Git sources. | `ghp_...` |
 | `TIDB_HOST` | Optional | TiDB host address (alternative if `TIDB_DATABASE_URL` is omitted). | `gateway01.us-east-1.prod.aws.tidbcloud.com` |
 | `TIDB_PORT` | Optional | TiDB port (defaults to `4000`). | `4000` |
 | `TIDB_USER` | Optional | TiDB username (alternative if `TIDB_DATABASE_URL` is omitted). | `xxxxxx.root` |
 | `TIDB_PASSWORD` | Optional | TiDB password (alternative if `TIDB_DATABASE_URL` is omitted). | `password` |
 | `TIDB_DATABASE` | Optional | TiDB database name (defaults to `test`). | `test` |
-
 ### 2. Repository Variables (Non-Sensitive Configuration)
 
 Configure these in the **Variables** tab (optional):
 
 | Variable Name | Required | Default | Description |
 |---|:---:|:---:|---|
+| `EMBEDDING_PROVIDER` | No | `openai` | Embedding provider: `openai`, `siliconflow`, `huggingface`, `gemini`, `jina`, `tidb_auto`, `mock`. |
+| `EMBEDDING_BASE_URL` | No | `https://api.siliconflow.cn/v1` | Base URL for OpenAI-compatible embedding API. |
+| `EMBEDDING_MODEL` | No | `BAAI/bge-m3` | Embedding model identifier. |
+| `EMBEDDING_DIMENSION` | No | `1024` | Vector dimension size. |
 | `TIDB_SSL` | No | `true` | Enforces TLS connection to TiDB Cloud. |
 | `TIDB_SSL_REJECT_UNAUTHORIZED` | No | `true` | Validates server CA certificate against trusted root CAs. |
-
+| `TIDB_CA` | No | None | Custom CA certificate string or file path if needed. |
 ### 3. Workflow Manual Inputs (`workflow_dispatch`)
 
 #### `sync.yml` (Knowledge Base Synchronization)

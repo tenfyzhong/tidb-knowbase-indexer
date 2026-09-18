@@ -54,12 +54,23 @@ export const EnvSchema = z.object({
     return val ?? true;
   }, z.boolean()).default(true),
   TIDB_CA: z.string().optional(),
+  // Embedding settings
+  EMBEDDING_PROVIDER: z
+    .enum(["openai", "siliconflow", "huggingface", "gemini", "jina", "tidb_auto", "auto", "mock"])
+    .optional(),
+  EMBEDDING_API_KEY: z.string().optional(),
+  OPENAI_API_KEY: z.string().optional(),
+  HF_TOKEN: z.string().optional(),
+  GEMINI_API_KEY: z.string().optional(),
+  JINA_API_KEY: z.string().optional(),
+  EMBEDDING_BASE_URL: z.string().optional(),
+  EMBEDDING_MODEL: z.string().optional(),
+  EMBEDDING_DIMENSION: z.coerce.number().int().positive().optional(),
   // Git authentication
   GH_PAT: z.string().optional(),
   GH_TOKEN: z.string().optional(),
   GITHUB_TOKEN: z.string().optional()
 });
-
 export type Env = z.infer<typeof EnvSchema>;
 
 export function parseConfig(rawJson: string): Config {
@@ -101,6 +112,11 @@ export function sanitizeLogs(config: Config, env: Env): void {
   if (env.GH_PAT) secretsToMask.push(env.GH_PAT);
   if (env.GH_TOKEN) secretsToMask.push(env.GH_TOKEN);
   if (env.GITHUB_TOKEN) secretsToMask.push(env.GITHUB_TOKEN);
+  if (env.EMBEDDING_API_KEY) secretsToMask.push(env.EMBEDDING_API_KEY);
+  if (env.OPENAI_API_KEY) secretsToMask.push(env.OPENAI_API_KEY);
+  if (env.HF_TOKEN) secretsToMask.push(env.HF_TOKEN);
+  if (env.GEMINI_API_KEY) secretsToMask.push(env.GEMINI_API_KEY);
+  if (env.JINA_API_KEY) secretsToMask.push(env.JINA_API_KEY);
 
   for (const source of config) {
     if (source.type === "git" && source.token) {
