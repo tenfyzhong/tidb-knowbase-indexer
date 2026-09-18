@@ -77,6 +77,24 @@ describe("config", () => {
     it("should throw error when database settings are missing", () => {
       expect(() => parseEnv({})).toThrow("Missing database connection settings");
     });
+
+    it("should parse Cloudflare embedding environment variables", () => {
+      const rawEnv = {
+        TIDB_DATABASE_URL: "mysql://user:pass@gateway01.us-east-1.prod.aws.tidbcloud.com:4000/test",
+        EMBEDDING_PROVIDER: "cloudflare",
+        CLOUDFLARE_API_TOKEN: "cf-token-12345",
+        CLOUDFLARE_ACCOUNT_ID: "cf-account-67890",
+        CLOUDFLARE_MODEL: "@cf/baai/bge-m3",
+        EMBEDDING_DIMENSION: "1024"
+      };
+
+      const env = parseEnv(rawEnv);
+      expect(env.EMBEDDING_PROVIDER).toBe("cloudflare");
+      expect(env.CLOUDFLARE_API_TOKEN).toBe("cf-token-12345");
+      expect(env.CLOUDFLARE_ACCOUNT_ID).toBe("cf-account-67890");
+      expect(env.CLOUDFLARE_MODEL).toBe("@cf/baai/bge-m3");
+      expect(env.EMBEDDING_DIMENSION).toBe(1024);
+    });
   });
 
     it("should configure TLS with minimum TLSv1.2 by default", () => {
@@ -128,7 +146,9 @@ describe("config", () => {
       const env = parseEnv({
         TIDB_DATABASE_URL: "mysql://user:pass12345@gateway.tidbcloud.com:4000/test",
         TIDB_PASSWORD: "secret_db_password",
-        GH_PAT: "ghp_pat_secret_987"
+        GH_PAT: "ghp_pat_secret_987",
+        CLOUDFLARE_API_TOKEN: "cf-token-secret-value",
+        CLOUDFLARE_ACCOUNT_ID: "cf-acc-secret-value"
       });
 
       sanitizeLogs(config, env);
@@ -137,6 +157,8 @@ describe("config", () => {
       expect(setSecretSpy).toHaveBeenCalledWith("secret_db_password");
       expect(setSecretSpy).toHaveBeenCalledWith("ghp_pat_secret_987");
       expect(setSecretSpy).toHaveBeenCalledWith("ghp_secret_token_value_123");
+      expect(setSecretSpy).toHaveBeenCalledWith("cf-token-secret-value");
+      expect(setSecretSpy).toHaveBeenCalledWith("cf-acc-secret-value");
     });
   });
 });

@@ -1,14 +1,14 @@
 # tidb-knowbase-indexer
 
-Automated incremental knowledge base indexer with flexible embedding providers (SiliconFlow, Hugging Face, Gemini, OpenAI, Jina, and TiDB Cloud native Auto Embedding) and vector storage.
+Automated incremental knowledge base indexer supporting Cloudflare Workers AI embedding and TiDB Cloud native Auto Embedding with vector storage.
 
 ## Overview
 
 `tidb-knowbase-indexer` synchronizes documents periodically via GitHub Actions (or locally) from multiple sources directly into TiDB Cloud:
-- **Flexible Embedding Providers**:
-  - **PingCAP Cloud China (`console.cloud.pingkai.cn`)**: Seamlessly connects to SiliconFlow (硅基流动 `https://api.siliconflow.cn/v1`) with completely free `BAAI/bge-m3` (1024-dim) or `BAAI/bge-large-zh-v1.5`, Hugging Face Inference API, Google Gemini, or Jina AI.
-  - **TiDB Cloud Global (`tidbcloud.com` on AWS)**: Supports zero-key serverless `EMBED_TEXT("tidbcloud_free/amazon/titan-embed-text-v2", text)` via `EMBEDDING_PROVIDER=tidb_auto`, as well as client-side embedding providers.
-  - **Self-Healing Schema Migration**: Automatically detects if the table uses an Auto Embedding generated column or client-side `VECTOR(dim)` column and re-provisions cleanly if switching modes.
+- **Supported Embedding Providers**:
+  - **Cloudflare Workers AI (`@cf/baai/bge-m3`, 1024-dim)**: 100% free with 10,000 Neurons/day (approx. 9.3M tokens/day, ~15,000-20,000 chunks/day). High speed, zero cold start. Ideal for domestic PingCAP Cloud China (`console.cloud.pingkai.cn`) and global TiDB Cloud alike.
+  - **TiDB Cloud Native Auto Embedding (`tidb_auto`)**: Built-in zero-key embedding for global AWS TiDB Cloud Starter clusters using `EMBED_TEXT("tidbcloud_free/amazon/titan-embed-text-v2", text)`.
+  - **Self-Healing Schema Migration**: Automatically detects whether the database table uses an Auto Embedding generated column or client-side `VECTOR(dim)` column and re-provisions cleanly if switching modes.
 - **Private & Public Git Repositories**: Incremental indexing based on Git commit diffs (`git diff <lastCommit> HEAD`). Automatically supports token-based authentication for private repositories without needing SSH keys.
 - **Websites & Blogs**: Recursively crawls web pages and extracts clean content.
 - **Privacy Filter (`#confidential`)**: Automatically skips Markdown notes tagged with `#confidential` (in YAML frontmatter or inline body text), preventing sensitive notes from being indexed.
@@ -37,29 +37,28 @@ Automated incremental knowledge base indexer with flexible embedding providers (
 
 ## Free Tier Setup
 
-### Scenario A: PingCAP Cloud China (`console.cloud.pingkai.cn`)
+### Scenario A: PingCAP Cloud China (`console.cloud.pingkai.cn`) or Global TiDB Cloud via Cloudflare Workers AI
 
-PingCAP Cloud China clusters do not support `tidbcloud_free` (Bedrock). You can achieve 100% free vector indexing using **SiliconFlow (硅基流动)**:
+PingCAP Cloud China clusters run on domestic infrastructure where `tidbcloud_free` is not available. Cloudflare Workers AI provides free, high-performance embedding with zero cold start:
 
-1. Register at [SiliconFlow](https://siliconflow.cn/) and get a free API Key.
-2. Set GitHub Secrets / Variables:
-   - `EMBEDDING_PROVIDER`: `openai` (or leave default)
-   - `EMBEDDING_BASE_URL`: `https://api.siliconflow.cn/v1`
-   - `EMBEDDING_MODEL`: `BAAI/bge-m3`
-   - `EMBEDDING_DIMENSION`: `1024`
-   - `EMBEDDING_API_KEY`: Your SiliconFlow API Key (`sk-...`)
+1. Log in to [Cloudflare Dashboard](https://dash.cloudflare.com/), copy your **Account ID**.
+2. Create an API Token under **My Profile -> API Tokens** with `Workers AI: Read` permission.
+3. Configure GitHub Secrets / Variables:
+   - **Secrets**:
+     - `CLOUDFLARE_API_TOKEN`: Your Cloudflare API Token.
+     - `CLOUDFLARE_ACCOUNT_ID`: Your 32-character Cloudflare Account ID.
+     - `TIDB_DATABASE_URL`: Your PingCAP Cloud or TiDB Cloud connection string.
+     - `CONFIG_JSON`: Data source configuration.
+   - **Variables** (optional, defaults are already preconfigured):
+     - `EMBEDDING_PROVIDER`: `cloudflare`
+     - `CLOUDFLARE_MODEL`: `@cf/baai/bge-m3`
+     - `EMBEDDING_DIMENSION`: `1024`
 
-### Scenario B: TiDB Cloud Global (`tidbcloud.com` on AWS)
+### Scenario B: TiDB Cloud Global (`tidbcloud.com` on AWS) via Native Auto Embedding
 
 Global AWS clusters support built-in zero-configuration Auto Embedding:
 1. Set `EMBEDDING_PROVIDER`: `tidb_auto`
-2. No embedding API key is required!
-
-### Scenario C: Hugging Face / Gemini / Jina
-- **Hugging Face**: Set `HF_TOKEN` and optional `EMBEDDING_MODEL` (e.g. `BAAI/bge-m3`).
-- **Google Gemini**: Set `GEMINI_API_KEY` (defaults to `text-embedding-004`, 768 dim).
-- **Jina AI**: Set `JINA_API_KEY` (defaults to `jina-embeddings-v3`, 1024 dim).
----
+2. No external embedding API key or token is required!
 
 ## GitHub Actions Workflows & Parameters
 
@@ -73,10 +72,8 @@ Configure these in the **Secrets** tab:
 |---|:---:|---|---|
 | `CONFIG_JSON` | **Yes** | JSON array configuring data sources (Git repositories or Web URLs). | `[{"name":"notes","type":"git","url":"..."}]` |
 | `TIDB_DATABASE_URL` | **Yes** | Connection string for TiDB Cloud Starter. TLS 1.2+ is enforced automatically. | `mysql://<user>:<password>@gateway.tidbcloud.com:4000/test?ssl={"minVersion":"TLSv1.2"}` |
-| `EMBEDDING_API_KEY` | Optional | API key for embedding provider (e.g. SiliconFlow, OpenAI). | `sk-...` |
-| `HF_TOKEN` | Optional | Hugging Face User Access Token. | `hf_...` |
-| `GEMINI_API_KEY` | Optional | Google Gemini API Key. | `AIza...` |
-| `JINA_API_KEY` | Optional | Jina AI API Key. | `jina_...` |
+| `CLOUDFLARE_API_TOKEN` | Required for Cloudflare | Cloudflare API Token with Workers AI Read permission (or `EMBEDDING_API_KEY`). | `Bearer ...` |
+| `CLOUDFLARE_ACCOUNT_ID` | Required for Cloudflare | Cloudflare 32-character Account ID. | `0123456789abcdef0123456789abcdef` |
 | `GH_PAT` | Optional | GitHub Personal Access Token with repository read permissions for private Git sources. | `ghp_...` |
 | `TIDB_HOST` | Optional | TiDB host address (alternative if `TIDB_DATABASE_URL` is omitted). | `gateway01.us-east-1.prod.aws.tidbcloud.com` |
 | `TIDB_PORT` | Optional | TiDB port (defaults to `4000`). | `4000` |
@@ -89,9 +86,9 @@ Configure these in the **Variables** tab (optional):
 
 | Variable Name | Required | Default | Description |
 |---|:---:|:---:|---|
-| `EMBEDDING_PROVIDER` | No | `openai` | Embedding provider: `openai`, `siliconflow`, `huggingface`, `gemini`, `jina`, `tidb_auto`, `mock`. |
-| `EMBEDDING_BASE_URL` | No | `https://api.siliconflow.cn/v1` | Base URL for OpenAI-compatible embedding API. |
-| `EMBEDDING_MODEL` | No | `BAAI/bge-m3` | Embedding model identifier. |
+| `EMBEDDING_PROVIDER` | No | `cloudflare` | Embedding provider: `cloudflare` (or `cf`), `tidb_auto` (or `auto`), `mock`. |
+| `CLOUDFLARE_MODEL` | No | `@cf/baai/bge-m3` | Embedding model identifier on Cloudflare. |
+| `CLOUDFLARE_BASE_URL` | No | `https://api.cloudflare.com/client/v4` | Optional custom Cloudflare base URL or AI Gateway URL. |
 | `EMBEDDING_DIMENSION` | No | `1024` | Vector dimension size. |
 | `TIDB_SSL` | No | `true` | Enforces TLS connection to TiDB Cloud. |
 | `TIDB_SSL_REJECT_UNAUTHORIZED` | No | `true` | Validates server CA certificate against trusted root CAs. |
