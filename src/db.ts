@@ -193,27 +193,39 @@ export class TiDBClient {
     );
   }
 
-  async upsertChunks(chunks: ChunkRecord[]): Promise<number> {
+  async upsertChunks(chunks: ChunkRecord[], options?: { onProgress?: (processed: number, total: number) => void }): Promise<number> {
     if (chunks.length === 0) return 0;
 
-    if (!this.embeddingProvider.isAutoEmbedding) {
-      const needsEmbedding = chunks.filter((c) => !c.embedding || c.embedding.length === 0);
-      if (needsEmbedding.length > 0) {
-        const texts = needsEmbedding.map((c) => c.text);
-        const embeddings = await this.embeddingProvider.embed(texts);
-        for (let i = 0; i < needsEmbedding.length; i++) {
-          needsEmbedding[i].embedding = embeddings[i];
-        }
-      }
-    }
-
-    const batchSize = 10;
+    const blockSize = 40;
     let totalUpserted = 0;
 
-    for (let i = 0; i < chunks.length; i += batchSize) {
-      const batch = chunks.slice(i, i + batchSize);
-      const count = await this.insertBatchWithRetry(batch);
-      totalUpserted += count;
+    for (let i = 0; i < chunks.length; i += blockSize) {
+      const block = chunks.slice(i, i + blockSize);
+
+      if (!this.embeddingProvider.isAutoEmbedding) {
+        const needsEmbedding = block.filter((c) => !c.embedding || c.embedding.length === 0);
+        if (needsEmbedding.length > 0) {
+          const texts = needsEmbedding.map((c) => c.text);
+          const embeddings = await this.embeddingProvider.embed(texts);
+          for (let j = 0; j < needsEmbedding.length; j++) {
+            needsEmbedding[j].embedding = embeddings[j];
+          }
+        }
+      }
+
+      const sqlBatchSize = 10;
+      for (let j = 0; j < block.length; j += sqlBatchSize) {
+        const batch = block.slice(j, j + sqlBatchSize);
+        const count = await this.insertBatchWithRetry(batch);
+        totalUpserted += count;
+      }
+
+      const currentProcessed = Math.min(i + block.length, chunks.length);
+      if (options?.onProgress) {
+        options.onProgress(currentProcessed, chunks.length);
+      } else if (chunks.length > blockSize && (i + blockSize < chunks.length || currentProcessed === chunks.length)) {
+        console.log(`[TiDB] Processed and upserted ${currentProcessed}/${chunks.length} chunks...`);
+      }
     }
 
     return totalUpserted;

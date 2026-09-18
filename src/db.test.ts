@@ -148,5 +148,30 @@ describe("db", () => {
         expect.anything()
       );
     });
+    it("streams chunk embedding in blocks and calls onProgress callback", async () => {
+      const mockProvider = new MockEmbeddingProvider(1024);
+      const embedSpy = vi.spyOn(mockProvider, "embed");
+      const client = new TiDBClient(baseEnv, mockProvider);
+
+      mockPool.query.mockResolvedValue([{}]);
+
+      const chunks = Array.from({ length: 90 }, (_, i) => ({
+        id: `chunk-${i}`,
+        text: `Text ${i}`,
+        source: "docs",
+        path: `doc-${i}.md`,
+        chunkIndex: 0
+      }));
+
+      const progressUpdates: number[] = [];
+      const count = await client.upsertChunks(chunks, {
+        onProgress: (processed) => progressUpdates.push(processed)
+      });
+
+      expect(count).toBe(90);
+      // Block size is 40 -> 3 blocks (40, 40, 10)
+      expect(embedSpy).toHaveBeenCalledTimes(3);
+      expect(progressUpdates).toEqual([40, 80, 90]);
+    });
   });
 });

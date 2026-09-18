@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { setTimeout as sleep } from "node:timers/promises";
 import type { Env } from "./config.js";
 
 export interface EmbeddingProvider {
@@ -111,55 +112,121 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
 
 export class HuggingFaceEmbeddingProvider implements EmbeddingProvider {
   private readonly token: string;
+  private readonly retryDelayMs?: number;
   readonly model: string;
   readonly dimension: number;
   readonly isAutoEmbedding = false;
 
-  constructor(options: { token?: string; model?: string; dimension?: number }) {
+  constructor(options: { token?: string; model?: string; dimension?: number; retryDelayMs?: number }) {
     this.token = options.token || "";
     this.model = options.model || "BAAI/bge-m3";
     this.dimension = options.dimension || 1024;
+    this.retryDelayMs = options.retryDelayMs;
   }
 
   async embed(texts: string[]): Promise<number[][]> {
     if (texts.length === 0) return [];
 
-    const batchSize = 16;
+    const batchSize = 8;
     const allEmbeddings: number[][] = [];
     const url = `https://router.huggingface.co/hf-inference/models/${this.model}/pipeline/feature-extraction`;
 
     for (let i = 0; i < texts.length; i += batchSize) {
       const batch = texts.slice(i, i + batchSize).map((t) => {
         const cleaned = t.replace(/\0/g, "").trim();
-        return cleaned.length > 2500 ? cleaned.slice(0, 2500) : cleaned;
+        return cleaned.length > 2000 ? cleaned.slice(0, 2000) : cleaned;
       });
 
-      const response = await fetch(url, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(this.token ? { Authorization: `Bearer ${this.token}` } : {}),
-          "x-wait-for-model": "true"
-        },
-        body: JSON.stringify({
-          inputs: batch,
-          options: { wait_for_model: true }
-        })
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text().catch(() => "");
-        throw new Error(`HuggingFace embedding failed (${response.status}): ${errorText}`);
-      }
-
-      const raw = (await response.json()) as unknown;
-      const parsed = this.normalizeEmbeddings(raw, batch.length);
-      for (const vector of parsed) {
+      const vectors = await this.fetchWithRetry(url, batch);
+      for (const vector of vectors) {
         allEmbeddings.push(vector);
       }
     }
 
     return allEmbeddings;
+  }
+
+  private async fetchWithRetry(url: string, batch: string[]): Promise<number[][]> {
+    const maxAttempts = 5;
+    let attempt = 0;
+
+    while (attempt < maxAttempts) {
+      attempt++;
+      try {
+        const response = await fetch(url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(this.token ? { Authorization: `Bearer ${this.token}` } : {}),
+            "x-wait-for-model": "true"
+          },
+          body: JSON.stringify({
+            inputs: batch,
+            options: { wait_for_model: true }
+          })
+        });
+
+        if (response.ok) {
+          const raw = (await response.json()) as unknown;
+          return this.normalizeEmbeddings(raw, batch.length);
+        }
+
+        const errorText = await response.text().catch(() => "");
+
+        // Case 1: Model loading (503)
+        if (response.status === 503) {
+          let waitMs = this.retryDelayMs ?? 15000;
+          if (this.retryDelayMs === undefined) {
+            try {
+              const parsed = JSON.parse(errorText);
+              if (typeof parsed.estimated_time === "number") {
+                waitMs = Math.min(Math.max(Math.ceil(parsed.estimated_time * 1000), 5000), 45000);
+              }
+            } catch {
+              // use default waitMs
+            }
+          }
+          console.warn(`[HuggingFace] Model ${this.model} is loading (503). Waiting ${Math.round(waitMs / 1000)}s (attempt ${attempt}/${maxAttempts})...`);
+          await sleep(waitMs);
+          continue;
+        }
+
+        // Case 2: Gateway timeout (504), Bad Gateway (502), Rate Limit (429), or Server Error (500)
+        if (response.status === 504 || response.status === 502 || response.status === 429 || response.status === 500) {
+          if (attempt < maxAttempts) {
+            if (response.status === 504 && batch.length > 2) {
+              console.warn(`[HuggingFace] 504 timeout on batch of ${batch.length}, splitting into smaller sub-batches...`);
+              const mid = Math.floor(batch.length / 2);
+              const part1 = await this.fetchWithRetry(url, batch.slice(0, mid));
+              const part2 = await this.fetchWithRetry(url, batch.slice(mid));
+              return [...part1, ...part2];
+            }
+
+            const backoffMs = this.retryDelayMs ?? Math.min(attempt * 6000 + Math.floor(Math.random() * 3000), 30000);
+            console.warn(`[HuggingFace] Server returned ${response.status} (${response.statusText || "error"}). Retrying in ${Math.round(backoffMs / 1000)}s (attempt ${attempt}/${maxAttempts})...`);
+            await sleep(backoffMs);
+            continue;
+          }
+        }
+
+        throw new Error(`HuggingFace embedding failed (${response.status}): ${errorText}`);
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        if (message.includes("HuggingFace embedding failed")) {
+          throw err;
+        }
+
+        if (attempt < maxAttempts) {
+          const backoffMs = this.retryDelayMs ?? Math.min(attempt * 5000, 20000);
+          console.warn(`[HuggingFace] Network error: ${message}. Retrying in ${Math.round(backoffMs / 1000)}s (attempt ${attempt}/${maxAttempts})...`);
+          await sleep(backoffMs);
+          continue;
+        }
+        throw new Error(`HuggingFace embedding network failed after ${maxAttempts} attempts: ${message}`);
+      }
+    }
+
+    throw new Error(`HuggingFace embedding failed after ${maxAttempts} attempts`);
   }
 
   private normalizeEmbeddings(raw: unknown, expectedCount: number): number[][] {
