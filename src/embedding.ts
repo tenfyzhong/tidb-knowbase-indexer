@@ -124,29 +124,79 @@ export class HuggingFaceEmbeddingProvider implements EmbeddingProvider {
   async embed(texts: string[]): Promise<number[][]> {
     if (texts.length === 0) return [];
 
-    const url = `https://router.huggingface.co/hf-inference/models/${this.model}`;
-    const response = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(this.token ? { Authorization: `Bearer ${this.token}` } : {})
-      },
-      body: JSON.stringify({
-        inputs: texts.map((t) => (t.length > 2500 ? t.slice(0, 2500) : t)),
-        options: { wait_for_model: true }
-      })
-    });
+    const batchSize = 16;
+    const allEmbeddings: number[][] = [];
+    const url = `https://router.huggingface.co/hf-inference/models/${this.model}/pipeline/feature-extraction`;
 
-    if (!response.ok) {
-      const errorText = await response.text().catch(() => "");
-      throw new Error(`HuggingFace embedding failed (${response.status}): ${errorText}`);
+    for (let i = 0; i < texts.length; i += batchSize) {
+      const batch = texts.slice(i, i + batchSize).map((t) => {
+        const cleaned = t.replace(/\0/g, "").trim();
+        return cleaned.length > 2500 ? cleaned.slice(0, 2500) : cleaned;
+      });
+
+      const response = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(this.token ? { Authorization: `Bearer ${this.token}` } : {}),
+          "x-wait-for-model": "true"
+        },
+        body: JSON.stringify({
+          inputs: batch,
+          options: { wait_for_model: true }
+        })
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => "");
+        throw new Error(`HuggingFace embedding failed (${response.status}): ${errorText}`);
+      }
+
+      const raw = (await response.json()) as unknown;
+      const parsed = this.normalizeEmbeddings(raw, batch.length);
+      for (const vector of parsed) {
+        allEmbeddings.push(vector);
+      }
     }
 
-    const data = (await response.json()) as number[][] | number[];
-    if (Array.isArray(data) && data.length > 0 && typeof data[0] === "number") {
-      return [data as number[]];
+    return allEmbeddings;
+  }
+
+  private normalizeEmbeddings(raw: unknown, expectedCount: number): number[][] {
+    if (!Array.isArray(raw) || raw.length === 0) {
+      return Array.from({ length: expectedCount }, () => new Array(this.dimension).fill(0));
     }
-    return data as number[][];
+
+    // Case 1: 1D array [0.1, 0.2, ...] -> single vector
+    if (typeof raw[0] === "number") {
+      return [raw as number[]];
+    }
+
+    // Case 2: 2D array [[0.1, 0.2, ...], ...] -> batch of pooled sentence vectors
+    if (Array.isArray(raw[0]) && typeof raw[0][0] === "number") {
+      return raw as number[][];
+    }
+
+    // Case 3: 3D array [[[token1], [token2]], ...] -> batch of token vectors; perform mean pooling
+    if (Array.isArray(raw[0]) && Array.isArray(raw[0][0]) && typeof raw[0][0][0] === "number") {
+      const batch3D = raw as number[][][];
+      return batch3D.map((itemTokens) => {
+        if (itemTokens.length === 0) return new Array(this.dimension).fill(0);
+        const dim = itemTokens[0].length;
+        const pooled = new Array(dim).fill(0);
+        for (const tokenVec of itemTokens) {
+          for (let d = 0; d < dim; d++) {
+            pooled[d] += tokenVec[d];
+          }
+        }
+        for (let d = 0; d < dim; d++) {
+          pooled[d] /= itemTokens.length;
+        }
+        return pooled;
+      });
+    }
+
+    return Array.from({ length: expectedCount }, () => new Array(this.dimension).fill(0));
   }
 }
 
