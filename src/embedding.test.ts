@@ -113,6 +113,49 @@ describe("Embedding Providers", () => {
       await expect(provider.embed(["test"])).rejects.toThrow("Embedding API request failed (401 Unauthorized)");
     });
   });
+  describe("HuggingFaceEmbeddingProvider", () => {
+    const originalFetch = global.fetch;
+
+    beforeEach(() => {
+      global.fetch = vi.fn();
+    });
+
+    afterEach(() => {
+      global.fetch = originalFetch;
+    });
+
+    it("calls HuggingFace router endpoint with token and input", async () => {
+      (global.fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        ok: true,
+        json: async () => [
+          [0.1, 0.2],
+          [0.3, 0.4]
+        ]
+      });
+
+      const provider = new HuggingFaceEmbeddingProvider({
+        token: "hf_test",
+        model: "BAAI/bge-m3",
+        dimension: 2
+      });
+
+      const results = await provider.embed(["A", "B"]);
+      expect(results).toEqual([
+        [0.1, 0.2],
+        [0.3, 0.4]
+      ]);
+      expect(global.fetch).toHaveBeenCalledWith(
+        "https://router.huggingface.co/hf-inference/models/BAAI/bge-m3",
+        expect.objectContaining({
+          method: "POST",
+          headers: expect.objectContaining({
+            Authorization: "Bearer hf_test"
+          })
+        })
+      );
+    });
+  });
+
 
   describe("TiDBAutoEmbeddingProvider", () => {
     it("identifies as auto embedding and delegates computation to TiDB", async () => {
