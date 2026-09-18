@@ -124,7 +124,7 @@ describe("Embedding Providers", () => {
       global.fetch = originalFetch;
     });
 
-    it("calls HuggingFace router endpoint with token and input", async () => {
+    it("calls HuggingFace router pipeline/feature-extraction endpoint with token and x-wait-for-model", async () => {
       (global.fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
         ok: true,
         json: async () => [
@@ -145,14 +145,85 @@ describe("Embedding Providers", () => {
         [0.3, 0.4]
       ]);
       expect(global.fetch).toHaveBeenCalledWith(
-        "https://router.huggingface.co/hf-inference/models/BAAI/bge-m3",
+        "https://router.huggingface.co/hf-inference/models/BAAI/bge-m3/pipeline/feature-extraction",
         expect.objectContaining({
           method: "POST",
           headers: expect.objectContaining({
-            Authorization: "Bearer hf_test"
+            Authorization: "Bearer hf_test",
+            "x-wait-for-model": "true"
+          }),
+          body: JSON.stringify({
+            inputs: ["A", "B"],
+            options: { wait_for_model: true }
           })
         })
       );
+    });
+
+    it("handles 1D array response when a single vector is returned", async () => {
+      (global.fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        ok: true,
+        json: async () => [0.5, 0.6]
+      });
+
+      const provider = new HuggingFaceEmbeddingProvider({
+        token: "hf_test",
+        model: "BAAI/bge-m3",
+        dimension: 2
+      });
+
+      const results = await provider.embed(["Single sentence"]);
+      expect(results).toEqual([[0.5, 0.6]]);
+    });
+
+    it("handles 3D array response (token-level embeddings) and applies mean pooling", async () => {
+      // Batch of 1 item with 2 tokens of 2 dimensions:
+      // Token 1: [1.0, 3.0], Token 2: [3.0, 5.0] -> Mean pooled: [2.0, 4.0]
+      (global.fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        ok: true,
+        json: async () => [
+          [
+            [1.0, 3.0],
+            [3.0, 5.0]
+          ]
+        ]
+      });
+
+      const provider = new HuggingFaceEmbeddingProvider({
+        token: "hf_test",
+        model: "BAAI/bge-m3",
+        dimension: 2
+      });
+
+      const results = await provider.embed(["Sentence to pool"]);
+      expect(results).toEqual([[2.0, 4.0]]);
+    });
+
+    it("splits large texts into batches of 16", async () => {
+      const batch1Response = Array.from({ length: 16 }, () => [0.1, 0.1]);
+      const batch2Response = Array.from({ length: 4 }, () => [0.2, 0.2]);
+
+      (global.fetch as unknown as ReturnType<typeof vi.fn>)
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => batch1Response
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => batch2Response
+        });
+
+      const provider = new HuggingFaceEmbeddingProvider({
+        token: "hf_test",
+        model: "BAAI/bge-m3",
+        dimension: 2
+      });
+
+      const texts = Array.from({ length: 20 }, (_, i) => `Text ${i}`);
+      const results = await provider.embed(texts);
+
+      expect(results.length).toBe(20);
+      expect(global.fetch).toHaveBeenCalledTimes(2);
     });
   });
 
