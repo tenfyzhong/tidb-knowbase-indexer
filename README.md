@@ -158,6 +158,8 @@ Configure these in the **Variables** tab (optional):
 
 ## Manual & Local Usage
 
+Use Node.js 22.23.4 or a later 22.x patch release. The GitHub Actions workflows are pinned to 22.23.4, the October 2026 security release.
+
 ### Running Synchronization Locally
 
 ```bash
